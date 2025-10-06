@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SimpleStorage Frontend</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.10.0/dist/ethers.umd.min.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: linear-gradient(120deg, #f8fafc 0%, #e0e7ff 100%);
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(60,72,88,0.12);
+      padding: 2em 2.5em;
+      margin-top: 3em;
+      width: 100%;
+      max-width: 400px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      color: #4f46e5;
+      margin-bottom: 1em;
+      font-size: 2em;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    button {
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.7em 1.5em;
+      font-size: 1em;
+      cursor: pointer;
+      margin: 0.5em 0;
+      transition: background 0.2s;
+      box-shadow: 0 2px 8px rgba(79,70,229,0.08);
+    }
+    button:hover {
+      background: #6366f1;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    input[type="text"] {
+      padding: 0.6em;
+      border-radius: 8px;
+      border: 1px solid #c7d2fe;
+      font-size: 1em;
+      margin-right: 0.5em;
+      width: 70%;
+      margin-bottom: 1em;
+    }
+    #messageDisplay {
+      margin-top: 1em;
+      font-weight: bold;
+      color: #2563eb;
+      background: #e0e7ff;
+      padding: 0.5em 1em;
+      border-radius: 8px;
+      min-height: 2em;
+      width: 100%;
+      text-align: center;
+    }
+    #status {
+      color: #059669;
+      margin-top: 1em;
+      font-size: 1em;
+      min-height: 1.5em;
+      text-align: center;
+    }
+    #walletAddress {
+      color: #64748b;
+      font-size: 0.95em;
+      margin-bottom: 1em;
+      word-break: break-all;
+      text-align: center;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #e5e7eb;
+      margin: 1.5em 0;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Multi Network Smart Contract Execution</h1>
+    <div style="width:100%;margin-bottom:1em;">
+      <label for="networkMode" style="font-weight:600;color:#4f46e5;">Select Mode:</label>
+      <select id="networkMode" style="margin-left:1em;padding:0.5em 1em;border-radius:8px;border:1px solid #c7d2fe;">
+        <option value="simulation">Simulation Mode (Hardhat Local Node)</option>
+        <option value="testnet">Testnet Mode (MetaMask)</option>
+      </select>
+    </div>
+    <button id="connectButton" style="position:relative;">
+      Connect Wallet
+      <span class="info-icon" title="Connect your MetaMask wallet to interact with the contract." style="margin-left:8px;cursor:pointer;">&#9432;</span>
+    </button>
+    <div id="walletAddress"></div>
+    <hr>
+    <div style="width:100%;display:flex;flex-direction:column;align-items:center;">
+      <input type="text" id="newMessage" placeholder="Enter new message">
+      <button id="setMessageButton" style="position:relative;" disabled>
+        Set Message
+        <span class="info-icon" title="Stores a new message on the blockchain (costs gas)." style="margin-left:8px;cursor:pointer;">&#9432;</span>
+      </button>
+    </div>
+    <div style="width:100%;display:flex;flex-direction:column;align-items:center;">
+      <button id="getMessageButton" style="position:relative;" disabled>
+        Get Message
+        <span class="info-icon" title="Reads the stored message (free)." style="margin-left:8px;cursor:pointer;">&#9432;</span>
+      </button>
+      <div id="messageDisplay" style="display:none"></div>
+    </div>
+    <div id="testnetContractSection" style="width:100%;display:flex;flex-direction:column;align-items:center;">
+      <input type="text" id="contractAddressInput" placeholder="Enter testnet contract address" style="width:100%;margin-bottom:0.5em;" />
+      <button id="deployButton" style="background:#10b981;">
+        Deploy SimpleStorage to Hoodi
+      </button>
+      <div id="contractHint" style="color:#64748b;margin-top:0.5em;margin-bottom:0.5em;text-align:center;font-size:0.9em;"></div>
+    </div>
+    <div id="contractAddressSection" style="margin-top:1.5em;color:#2563eb;font-weight:600;"></div>
+    <div id="status"></div>
+    <div id="notification" style="margin-top:1em;"></div>
+  </div>
+  <script src="index.js?v=2"></script>
+</body>
+</html>
