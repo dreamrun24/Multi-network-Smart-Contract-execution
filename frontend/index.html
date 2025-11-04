@@ -3,140 +3,286 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SimpleStorage Frontend</title>
+  <title>Multi Network Smart Contract Playground</title>
+  <!-- Compile in a Web Worker to avoid main-thread WASM limits -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.10.0/dist/ethers.umd.min.js"></script>
   <style>
+    :root {
+      --bg-start: #0ea5e9;
+      --bg-end: #6366f1;
+      --surface: rgba(255,255,255,0.66);
+      --surface-border: rgba(255,255,255,0.35);
+      --text: #0f172a;
+      --muted: #64748b;
+      --primary: #4f46e5;
+      --primary-2: #6366f1;
+      --success: #10b981;
+      --danger: #ef4444;
+      --ring: #93c5fd;
+    }
+    html, body { height: auto; overflow: auto; }
     body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      background: linear-gradient(120deg, #f8fafc 0%, #e0e7ff 100%);
-      margin: 0;
-      padding: 0;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, rgba(99,102,241,0.25), transparent 60%),
+                  radial-gradient(1200px 600px at 80% 110%, rgba(14,165,233,0.25), transparent 60%),
+                  linear-gradient(120deg, #f8fafc 0%, #eef2ff 100%);
+      margin: 0; padding: 0; min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center;
+      color: var(--text);
     }
     .container {
-      background: #fff;
-      border-radius: 16px;
-      box-shadow: 0 4px 24px rgba(60,72,88,0.12);
-      padding: 2em 2.5em;
-      margin-top: 3em;
-      width: 100%;
-      max-width: 400px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+      background: var(--surface);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--surface-border);
+      border-radius: 18px;
+      box-shadow: 0 10px 40px rgba(2,6,23,0.12);
+      padding: clamp(16px, 2.4vw, 36px);
+      margin: clamp(12px, 2vh, 24px) auto;
+      min-height: unset;
+      max-height: none;
+      overflow: visible;
+      width: 100%; max-width: clamp(960px, 88vw, 1280px);
+      display: flex; flex-direction: column; align-items: center;
     }
     h1 {
-      color: #4f46e5;
-      margin-bottom: 1em;
-      font-size: 2em;
-      font-weight: 700;
-      letter-spacing: 1px;
+      color: var(--text); letter-spacing: 0.2px;
+      margin-bottom: .3rem; font-size: 2.1rem; font-weight: 800;
+      background: linear-gradient(90deg, var(--bg-end), var(--bg-start));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
     }
+    .subtitle { color: var(--muted); margin-top: .25rem; }
     button {
-      background: #4f46e5;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      padding: 0.7em 1.5em;
-      font-size: 1em;
-      cursor: pointer;
-      margin: 0.5em 0;
-      transition: background 0.2s;
-      box-shadow: 0 2px 8px rgba(79,70,229,0.08);
+      position: relative;
+      background: linear-gradient(180deg, var(--primary), var(--primary-2));
+      color:#fff; border: none; border-radius: 10px;
+      padding: 0.7em 1.1em; font-size: .98rem; cursor: pointer; margin: .35em 0;
+      transition: transform .1s ease, box-shadow .2s ease, filter .2s ease;
+      box-shadow: 0 6px 18px rgba(79,70,229,0.25);
     }
-    button:hover {
-      background: #6366f1;
-    }
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    input[type="text"] {
-      padding: 0.6em;
-      border-radius: 8px;
-      border: 1px solid #c7d2fe;
-      font-size: 1em;
-      margin-right: 0.5em;
-      width: 70%;
-      margin-bottom: 1em;
+    button:hover { transform: translateY(-1px); filter: brightness(1.03); }
+    button:active { transform: translateY(0); }
+    button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+    button:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
+    input[type="text"], select {
+      padding: .7em .9em; border-radius: 10px; border: 1px solid #dbeafe; font-size: .98rem;
+      width: 100%; margin-bottom: .6em; background: rgba(255,255,255,0.8);
     }
     #messageDisplay {
-      margin-top: 1em;
-      font-weight: bold;
-      color: #2563eb;
-      background: #e0e7ff;
-      padding: 0.5em 1em;
-      border-radius: 8px;
-      min-height: 2em;
-      width: 100%;
-      text-align: center;
+      margin-top: .75em; font-weight: 700; color: #1d4ed8; background: #e0e7ff;
+      padding: .6em 1em; border-radius: 10px; min-height: 2em; width: 100%; text-align: center;
     }
-    #status {
-      color: #059669;
-      margin-top: 1em;
-      font-size: 1em;
-      min-height: 1.5em;
-      text-align: center;
+    #status { color: #065f46; margin-top: .75em; font-size: .98rem; min-height: 1.5em; text-align: center; }
+    #walletAddress { color: var(--muted); font-size: .95rem; margin-bottom: 1em; word-break: break-all; text-align: center; }
+    .two-col { display:grid !important; grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.05fr); gap: clamp(16px, 1.8vw, 28px) !important; width: 100%; align-items: start; min-height: 0; overflow: visible; padding-bottom: 6px; }
+    @media (max-width: 980px) { .two-col { grid-template-columns: 1fr; } }
+    #leftPane, #rightPane { display:flex; flex-direction: column; min-height: 0; }
+    .card {
+      width:100%; background: rgba(255,255,255,0.65); border: 1px solid rgba(14,165,233,0.15);
+      border-radius: 14px; padding: 1.1rem; box-shadow: 0 8px 24px rgba(2,6,23,0.07);
+      display:flex; flex-direction: column; flex: 1; min-height: 0;
     }
-    #walletAddress {
-      color: #64748b;
-      font-size: 0.95em;
-      margin-bottom: 1em;
-      word-break: break-all;
-      text-align: center;
+    .step-title { display:flex; align-items:center; gap:8px; color:#0f172a; font-weight:800; }
+    .subtext { color: var(--muted); margin:.35em 0 .6em; }
+    .pill { display:flex; align-items:center; gap:8px; border-radius:12px; padding:.6em .9em; font-weight:700; }
+    .pill.connected { background:#d1fae5; color:#065f46; border:1px solid #10b981; }
+    .btn-success { background: linear-gradient(180deg, #10b981, #059669); box-shadow: 0 6px 18px rgba(16,185,129,0.25); }
+    .btn-secondary { background: #1118270d; color:#111827; border:1px solid #e5e7eb; }
+    .btn-dark { background:#111827; }
+    .btn-primary { background: linear-gradient(180deg, var(--primary), var(--primary-2)); }
+    label.step { font-weight:700; color: var(--primary); display:block; margin-bottom: .3em; }
+    .row { width:100%; margin-bottom:.6em; }
+    .step-check { margin-left:8px; color:#10b981; font-size:1.05em; display:none; }
+    /* Dark Mode */
+    .toggle { display:flex; align-items:center; gap:10px; font-weight:700; }
+    /* Fancy switch bound to input + label */
+    #themeToggle { position:absolute; opacity:0; width:0; height:0; }
+    #themeToggle + label { position:relative; padding-left:44px; cursor:pointer; }
+    #themeToggle + label::before { content:""; position:absolute; left:0; top:50%; transform:translateY(-50%);
+      width:36px; height:20px; background:#e5e7eb; border-radius:999px; transition:background .2s ease; }
+    #themeToggle + label::after { content:""; position:absolute; left:2px; top:50%; transform:translateY(-50%);
+      width:16px; height:16px; background:white; border-radius:50%; transition:left .2s ease, box-shadow .2s ease;
+      box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+    #themeToggle:checked + label::before { background:#111827; }
+    #themeToggle:checked + label::after { left:18px; }
+    body.dark {
+      background: radial-gradient(900px 500px at 20% -10%, rgba(14,165,233,0.15), transparent 60%),
+                  radial-gradient(900px 500px at 80% 110%, rgba(99,102,241,0.15), transparent 60%),
+                  linear-gradient(120deg, #0b1220 0%, #0f172a 100%);
+      color:#e2e8f0;
     }
-    hr {
-      border: none;
-      border-top: 1px solid #e5e7eb;
-      margin: 1.5em 0;
-      width: 100%;
+    body.dark .container { background: rgba(12,18,32,0.75); border-color: rgba(148,163,184,0.15); }
+    body.dark .card { background: rgba(15,23,42,0.6); border-color:#1f2937; }
+    body.dark .subtitle { color:#a5b4fc; }
+    body.dark button { box-shadow: none; }
+    body.dark #messageDisplay { color:#93c5fd; background:#1f2937; }
+    /* Editor sizing to fit viewport */
+    #sampleContract { flex: 1; height: auto; min-height: clamp(200px, 34vh, 460px); max-height: none; }
+    
+    /* Compact layout for short screens */
+    @media (max-height: 780px) {
+      h1 { font-size: 1.6rem; }
+      .subtitle { display:none; }
+      .card { padding: .9rem; }
+      button { padding: 0.6em 0.9em; }
+      #sampleContract { min-height: clamp(140px, 34vh, 420px); max-height: 46vh; }
     }
+    @media (max-height: 620px) {
+      .subtext { display:none; }
+      #sampleContract { min-height: clamp(120px, 30vh, 360px); max-height: 40vh; }
+    }
+    /* Extra compact layout for absolutely no page scroll on short screens */
+    @media (max-height: 760px) {
+      .card { padding: .8rem; }
+      .two-col { gap: 14px !important; }
+      button { padding: 0.5em 0.85em; }
+      input[type="text"], select { padding: .5em .7em; }
+      #contractInfoBox, #editorHelp { display:none; }
+      #sampleContract { min-height: clamp(130px, 32vh, 380px); max-height: 38vh; }
+    }
+    @media (max-height: 680px) {
+      h1 { font-size: 1.35rem; }
+      .card { padding: .72rem; }
+      button { padding: 0.45em 0.75em; font-size: .92rem; }
+      input[type="text"], select { padding: .48em .68em; font-size: .92rem; }
+      #sampleContract { min-height: clamp(120px, 28vh, 340px); max-height: 34vh; }
+    }
+    @media (max-height: 600px) {
+      h1 { font-size: 1.2rem; }
+      #sampleContract { min-height: clamp(110px, 26vh, 320px); max-height: 30vh; }
+    }
+    /* Notifications */
+    #notification { position: fixed; top: 16px; right: 16px; z-index: 9999; box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 12px; }
+    /* Animations */
+    @keyframes fadeIn { from { opacity:0; transform: translateY(4px);} to { opacity:1; transform: translateY(0);} }
+    .fade-in { animation: fadeIn 240ms ease-out; }
+
+
+    @keyframes glowOnce { from { box-shadow: 0 0 0 0 rgba(16,185,129,.45);} to { box-shadow: 0 0 0 14px rgba(16,185,129,0);} }
+    .glow-once { animation: glowOnce 900ms ease-out 1; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Multi Network Smart Contract Execution</h1>
-    <div style="width:100%;margin-bottom:1em;">
-      <label for="networkMode" style="font-weight:600;color:#4f46e5;">Select Mode:</label>
-      <select id="networkMode" style="margin-left:1em;padding:0.5em 1em;border-radius:8px;border:1px solid #c7d2fe;">
-        <option value="simulation">Simulation Mode (Hardhat Local Node)</option>
-        <option value="testnet">Testnet Mode (MetaMask)</option>
-      </select>
+  <h1>Multi Network Smart Contract Playground</h1>
+    <div class="toggle" style="margin-top:-0.5em;">
+      <input type="checkbox" id="themeToggle" />
+      <label for="themeToggle">Dark Mode</label>
     </div>
-    <button id="connectButton" style="position:relative;">
-      Connect Wallet
-      <span class="info-icon" title="Connect your MetaMask wallet to interact with the contract." style="margin-left:8px;cursor:pointer;">&#9432;</span>
-    </button>
-    <div id="walletAddress"></div>
-    <hr>
-    <div style="width:100%;display:flex;flex-direction:column;align-items:center;">
-      <input type="text" id="newMessage" placeholder="Enter new message">
-      <button id="setMessageButton" style="position:relative;" disabled>
-        Set Message
-        <span class="info-icon" title="Stores a new message on the blockchain (costs gas)." style="margin-left:8px;cursor:pointer;">&#9432;</span>
-      </button>
+    <p style="margin-top:-0.5em;color:#6b7280;text-align:center;max-width:780px;">Learn blockchain development by writing, deploying, and testing smart contracts.</p>
+    <div class="two-col" style="width:100%;">
+      <div id="leftPane" style="flex:1;min-width:280px;display:flex;flex-direction:column;align-items:flex-start;">
+        <div class="card">
+          <div class="step-title">⚙️ Setup & Test Your Contract</div>
+
+          <p class="subtext">Step 1: How do you want to test?</p>
+          <div class="row">
+            <label for="networkMode" class="step">Choose your testing mode... <span id="step1Check" class="step-check">✅</span></label>
+            <select id="networkMode" style="padding:0.5em 1em;border-radius:8px;border:1px solid #c7d2fe;">
+              <option value="testnet">Real Blockchain (Test Networks)</option>
+              <option value="simulation">Local Simulation (Hardhat Node)</option>
+            </select>
+          </div>
+
+          <label class="step">Step 2: Connect the wallet <span id="step2Check" class="step-check">✅</span></label>
+          <button id="connectButton" class="btn-primary" style="position:relative;">
+            Connect Wallet
+            <span class="info-icon" title="Connect your MetaMask wallet to interact." style="margin-left:8px;cursor:pointer;">&#9432;</span>
+          </button>
+          <div id="walletAddress" class="pill" style="margin-top:0.5em;"></div>
+
+          <div id="testnetNetworkRow" class="row" style="display:none;">
+            <label for="testnetNetwork" class="step">Step 3: Choose a Blockchain Network <span id="step3Check" class="step-check">✅</span></label>
+            <select id="testnetNetwork" style="padding:0.5em 1em;border-radius:8px;border:1px solid #c7d2fe;">
+              <option value="hoodi">Hoodi (Testnet)</option>
+              <option value="sepolia">Ethereum Sepolia</option>
+              <option value="amoy">Polygon Amoy</option>
+              <option value="bsctest">BNB Smart Chain Testnet</option>
+              <option value="fuji">Avalanche Fuji</option>
+             <option value="chiado">Gnosis Chiado</option>
+            </select>
+          <div id="networkStatus" class="pill" style="margin-top:0.25em;background:#eef2ff;color:#1f2937;border:1px solid #c7d2fe;border-radius:10px;">🌐 Selected: Hoodi (Testnet)</div>
+            <!-- Ensure key actions are visible without scrolling -->
+            <div id="updateMessageRow" class="row" style="margin-top:0.6em;display:flex;align-items:center;gap:8px;">
+              <label class="step" for="newMessage" style="margin-bottom:0.25em;">Update stored message</label>
+              <input id="newMessage" type="text" placeholder="Enter new message" style="flex:1;" />
+              <button id="setMessageButton" class="btn-primary" style="white-space:nowrap;">Update Message</button>
+            </div>
+            <button id="deployButton" class="btn-success" style="width:100%; margin-top:0.25em;">Step 4: Deploy Contract</button>
+            <!-- Moved faucet section closer to network selection so it's not at the bottom -->
+            <div id="faucetSection" style="display:none;margin-top:0.4em;display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
+              <button id="fundTestnetBtn" class="btn-success">Fund Testnet</button>
+              <span id="faucetHint" style="margin-left:8px;color:#64748b;font-size:0.9em;">Opens the faucet for the selected network.</span>
+            </div>
+            <p id="learnNote" style="margin-top:0.4em;color:#9ca3af;font-size:0.85em;">Built for learning. All networks are test networks — no real money needed!</p>
+          </div>
+
+          <!-- Optional contract address input removed per request -->
+
+          <div style="text-align:right;margin-top:4px;"><span id="step4Check" class="step-check">✅ Deployed</span></div>
+
+          <p class="subtext" style="margin-top:0.75em;">Complete the steps above to test your contract</p>
+          <!-- Message input removed; data set via contract code -->
+          <div id="messageDisplay" style="display:none;margin-top:0.5em"></div>
+
+          <div id="contractAddressSection" style="margin-top:1em;color:#2563eb;font-weight:600;"></div>
+          <div id="explorerLinks" style="margin-top:0.75em;font-size:0.95em;color:#1f2937;"></div>
+          <div id="status"></div>
+          <div id="notification" style="margin-top:1em;"></div>
+
+          
+        </div>
+      </div>
+      <div id="rightPane" style="flex:1;min-width:280px;">
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+            <div class="step-title">🧠 Your Smart Contract Code</div>
+            <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:#4f46e5;">
+              <input type="checkbox" id="editModeToggle" checked>
+              Allow Editing
+              <span class="info-icon" title="Toggle editing before deployment." style="margin-left:4px;cursor:pointer;">&#9432;</span>
+            </label>
+          </div>
+          <div id="contractInfoBox" style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:0.75em 0.9em;margin:0.75em 0;color:#374151;">
+            <strong style="display:flex;align-items:center;gap:6px;color:#111827;">📘 What is this contract?</strong>
+            <div style="font-size:0.95em;margin-top:4px;">This is a <strong>SimpleStorage</strong> contract that stores text on the blockchain. The <code style="background:#eef2ff;border-radius:4px;padding:2px 6px;">setMessage()</code> function saves your message, and <code style="background:#eef2ff;border-radius:4px;padding:2px 6px;">getMessage()</code> reads it back. Think of it like a digital sticky note that lives forever on the blockchain!</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:0.5em;">
+            <button id="resetContractBtn" class="btn-secondary">Undo Changes</button>
+            <button id="copyContractBtn" class="btn-dark">Copy Code</button>
+            <button id="toggleTipsBtn" class="btn-secondary" title="Show or hide the beginner tips">Show Tips</button>
+          </div>
+          <p id="editorHelp" style="color:#374151;margin-top:0.5em;">Edit the Solidity code. Deploy compiles your edits in-browser and deploys to the selected network.</p>
+          <div id="tipBox" style="display:none;margin-top:10px;background:#fff7ed;color:#7c2d12;border:1px solid #fdba74;border-radius:8px;padding:10px;">
+            <strong>Beginner Tip:</strong>
+            <ul style="margin:6px 0 0 20px;">
+              <li>Change the line <code style="background:#fffbeb;border-radius:4px;padding:2px 6px;">string private message = "Hello";</code> to your text, e.g. <code style="background:#fffbeb;border-radius:4px;padding:2px 6px;">"Hi"</code>.</li>
+              <li>Click <em>Step 4: Deploy Contract</em>. We deploy exactly what’s in the editor.</li>
+              <li>After deploy, the box under <em>Setup &amp; Test</em> shows <strong>Stored message: your text</strong>.</li>
+
+            </ul>
+            <div style="margin-top:6px;font-size:0.92em;color:#92400e;">On testnets, connect your wallet first. In simulation mode, no wallet is required.</div>
+          </div>
+          <textarea id="sampleContract" spellcheck="false" style="width:100%;height:300px;margin-top:0.5em;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.75em;font-family:Consolas, Monaco, 'Courier New', monospace;">// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract SimpleStorage {
+    string private message = "Hello";
+
+    function setMessage(string memory _message) public {
+        message = _message;
+    }
+
+    function getMessage() public view returns (string memory) {
+        return message;
+    }
+}
+          </textarea>
+          <div id="compileErrors" style="display:none;margin-top:10px;background:#fee2e2;color:#b91c1c;padding:10px;border-radius:8px;font-family:Consolas, Monaco, 'Courier New', monospace;white-space:pre-wrap;"></div>
+        </div>
+      </div>
     </div>
-    <div style="width:100%;display:flex;flex-direction:column;align-items:center;">
-      <button id="getMessageButton" style="position:relative;" disabled>
-        Get Message
-        <span class="info-icon" title="Reads the stored message (free)." style="margin-left:8px;cursor:pointer;">&#9432;</span>
-      </button>
-      <div id="messageDisplay" style="display:none"></div>
-    </div>
-    <div id="testnetContractSection" style="width:100%;display:flex;flex-direction:column;align-items:center;">
-      <input type="text" id="contractAddressInput" placeholder="Enter testnet contract address" style="width:100%;margin-bottom:0.5em;" />
-      <button id="deployButton" style="background:#10b981;">
-        Deploy SimpleStorage to Hoodi
-      </button>
-      <div id="contractHint" style="color:#64748b;margin-top:0.5em;margin-bottom:0.5em;text-align:center;font-size:0.9em;"></div>
-    </div>
-    <div id="contractAddressSection" style="margin-top:1.5em;color:#2563eb;font-weight:600;"></div>
-    <div id="status"></div>
-    <div id="notification" style="margin-top:1em;"></div>
   </div>
-  <script src="index.js?v=2"></script>
-</body>
+    <script src="index.js?v=11"></script>
+  </body>
 </html>

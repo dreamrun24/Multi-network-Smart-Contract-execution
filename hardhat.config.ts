@@ -1,7 +1,11 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 import type { HardhatUserConfig } from "hardhat/config";
-// Plugins disabled to avoid runtime conflicts during deployment scripts
+// Enable plugins for type augmentation and runtime helpers
+// import "@nomicfoundation/hardhat-ethers";
+// import "@nomicfoundation/hardhat-viem";
+// Ignition plugin provides tasks; modules import will work once package is installed
+import "@nomicfoundation/hardhat-ignition";
 
 const config: HardhatUserConfig = {
   solidity: {

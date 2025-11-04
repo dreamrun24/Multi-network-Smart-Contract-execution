@@ -1,9 +1,8 @@
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 
 async function main() {
-  const SimpleStorage = await ethers.getContractFactory("SimpleStorage");
-  const simpleStorage = await SimpleStorage.deploy();
-  await simpleStorage.deployed();
+  const { viem } = await network.connect();
+  const simpleStorage = await viem.deployContract("SimpleStorage");
   console.log("Contract deployed successfully at", simpleStorage.address);
 }
 
