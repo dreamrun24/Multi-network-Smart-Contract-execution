@@ -1,52 +1,79 @@
 
-## Project Overview
+# Multi Network Smart Contract Studio
 
-This example project includes:
+A beginner‑friendly, end‑to‑end playground to learn blockchain development. Write contracts, deploy locally or to testnets, and interact with ERC‑20 and ERC‑721 templates from a clean UI.
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using [`node:test`](nodejs.org/api/test.html), the new Node.js native test runner, and [`viem`](https://viem.sh/).
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+## Features
+- Smart Contract Playground: edit, deploy, and test a simple getter–setter contract.
+- ERC20 Token Creator: configure name/symbol/admin, deploy, and mint tokens.
+- ERC721 NFT Creator: deploy a minimal owner‑only mint contract and view tokenURI.
+- Beginner Mode tips and guardrails for safer first deployments.
+- Works with MetaMask and multiple networks (local Hardhat, Ethereum testnets).
 
-## Usage
+## Requirements
+- Node.js 18+
+- npm
+- MetaMask (browser extension)
+- Hardhat (installed via `npm i -D hardhat`)
+- Testnet funds (e.g., Holesky faucet) if deploying to public networks
 
-### Running Tests
+## Quick Start
+1. Install dependencies: `npm install` and `cd react-playground && npm install`.
+2. Start the frontend: `cd react-playground && npm run dev`.
+3. Open the app (shown in the terminal) and connect MetaMask.
+4. Choose a network (Local Hardhat or a testnet) and follow the tab instructions.
 
-To run all the tests in the project, execute the following command:
+## Local Development (Recommended)
+- Start Hardhat node: `npx hardhat node` (new terminal).
+- Frontend dev server: `cd react-playground && npm run dev`.
+- Optional contract deploys (scripts):
+  - `npx ts-node scripts/deploy-local-ethers.ts`
+  - `node scripts/deploy-local-ethers.mjs`
 
-```shell
-npx hardhat test
-```
+## Testnet Deployment
+- Create `.env` with `RPC_URL` and `PRIVATE_KEY` (use a test wallet only).
+- Run:
+  - `node scripts/check-chainid.mjs` to verify RPC.
+  - `node scripts/deploy-testnet-ethers.mjs` or
+  - `npx hardhat run scripts/deploy-testnet.ts --network <network>`.
+- Copy deployed addresses into the UI when applicable.
 
-You can also selectively run the Solidity or `node:test` tests:
+## Tabs and How To Use Them
+- Smart Contract Playground
+  - Edit the SimpleStorage contract on the right.
+  - Select a network, connect wallet, and click Deploy.
+  - Use the input at the bottom to call `setMessage`; read with `getMessage`.
 
-```shell
-npx hardhat test solidity
-npx hardhat test nodejs
-```
+- ERC20 Token Creator
+  - Fill in Token Name and Symbol.
+  - Set the Admin/Owner address (wallet that can mint).
+  - Click Deploy Token Contract, then use the Mint section to create tokens.
 
-### Make a deployment to Sepolia
+- ERC721 NFT Creator
+  - Set collection name and symbol.
+  - Admin/Owner address controls minting.
+  - Deploy, then mint a token with a `tokenURI` (ipfs:// or https://).
+  - Use Owner/Balance/TokenURI read panels to verify after confirmation.
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+## Scripts (Backend Utilities)
+Each script now includes a header explaining purpose and usage.
+- `scripts/deploy-local-ethers.*`: deploy to local Hardhat using Ethers.
+- `scripts/deploy-testnet-ethers.mjs`: deploy to public testnets using Ethers.
+- `scripts/deploy-testnet.ts`: Hardhat‑native deploy to a selected testnet.
+- `scripts/check-chainid.mjs`: print RPC chain ID.
+- `scripts/print-address-and-balance.mjs`: show address balance.
+- `scripts/send-op-tx.ts`: send a sample transaction (OP chain example).
 
-To run the deployment to a local chain:
+## Repo Structure
+- `contracts/` – Solidity contracts used by the app and scripts.
+- `react-playground/` – Vite + React frontend (three tabs).
+- `scripts/` – Deployment and utility scripts.
+- `hardhat.config.ts` – Hardhat configuration.
 
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
-```
+## Notes
+- Keep MetaMask and the app on the same network during deploy/mint.
+- Beginner Mode adds UI tips and avoids advanced features.
+- Use testnets only; never use real funds for experiments.
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
-
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
-
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
-
-After setting the variable, you can run the deployment with the Sepolia network:
-
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+---
+This project is part of the “Multi Network Smart Contract Studio”. Contributions and improvements are welcome.

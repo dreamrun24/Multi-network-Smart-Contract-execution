@@ -1,18 +1,29 @@
-# React + Vite
+# React Frontend – Multi Network Smart Contract Studio
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This is the Vite + React app that powers the three tabs:
+- Smart Contract Playground
+- ERC20 Token Creator
+- ERC721 NFT Creator
 
-Currently, two official plugins are available:
+## Requirements
+- Node.js 18+
+- npm
+- MetaMask installed in your browser
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Install & Run
+```bash
+cd react-playground
+npm install
+npm run dev
+```
+Open the local URL shown in the terminal (e.g., `http://127.0.0.1:5173/`).
 
-## React Compiler
+## Using the Tabs
+- Smart Contract Playground: choose a network, connect wallet, deploy the sample contract, and call `setMessage`/`getMessage`.
+- ERC20 Token Creator: fill name/symbol/admin and deploy; use the UI to mint tokens.
+- ERC721 NFT Creator: set collection name/symbol/admin; deploy and mint an NFT with a tokenURI.
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
-
-Note: This will impact Vite dev & build performances.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Notes
+- Keep your MetaMask network in sync with the app’s selected network.
+- Beginner Mode shows tips, uses owner‑only minting, and avoids advanced features.
+- For testnets, ensure your wallet has faucet funds before deploying or minting.
