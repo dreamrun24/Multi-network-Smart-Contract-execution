@@ -11,7 +11,7 @@ A beginner‑friendly, end‑to‑end playground to learn blockchain development
 - Works with MetaMask and multiple networks (local Hardhat, Ethereum testnets).
 
 ## Requirements
-- Node.js 18+
+- Node.js 
 - npm
 - MetaMask (browser extension)
 - Hardhat (installed via `npm i -D hardhat`)
