@@ -1,3 +1,18 @@
+/*
+  Beginner Guide: ERC20TokenCreator
+  - Purpose: Deploy an ERC‑20 token, mint supply, and read balance/total supply.
+  - Quick Steps:
+    1) Connect wallet and pick a test network.
+    2) Fill name, symbol, and admin (your address), then Deploy.
+    3) Enter recipient and amount, then Mint; reads auto-refresh.
+  - Key Functions:
+    compileERC20 → compiles Solidity or uses precompiled ABI/bytecode.
+    deployContract → deploys token and stores its address.
+    mintTokens → sends mint tx, waits for confirmation, then refreshes reads.
+  - UX Notes:
+    • Mint requires the admin to have the MINTER role.
+    • Errors and pending confirmations are surfaced clearly.
+*/
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './index.css';
 import { BrowserProvider, Contract, ethers } from 'ethers';

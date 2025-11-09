@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ Multi Network Smart Contract Studio – SimpleNFT.sol
+ Purpose: Minimal ERC-721-like NFT contract for the ERC721 NFT Creator tab.
+ Highlights:
+ - Owner-only mint to keep beginner flows safe.
+ - Tracks token ownership and tokenURI metadata.
+ - Omits transfers for simplicity (no marketplace complexity).
+*/
 contract SimpleNFT {
     string public name;
     string public symbol;

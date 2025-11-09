@@ -1,3 +1,14 @@
+/*
+ Multi Network Smart Contract Studio – TabbedApp.tsx
+ Purpose: Hosts the three main tabs and manages switching between them.
+ Quick overview:
+ - Tab: Smart Contract Playground – compile/deploy a simple contract in-browser.
+ - Tab: ERC20 Token Creator – configure, deploy, and mint ERC-20 tokens.
+ - Tab: ERC721 NFT Creator – deploy a minimal NFT contract and mint tokens.
+ Notes:
+ - Keeps state minimal; individual tabs manage their own logic and network.
+ - Beginners can use this as a hub to explore each module.
+*/
 import { useState } from 'react';
 import './index.css';
 import Playground from './Playground';

@@ -1,3 +1,10 @@
+/*
+ Multi Network Smart Contract Studio – scripts/print-address-and-balance.mjs
+ Purpose: Show an address and its ETH balance on the configured RPC.
+ Usage:
+ - Set RPC_URL and ADDRESS env vars and run:
+ - `node scripts/print-address-and-balance.mjs`
+*/
 import { readFileSync } from 'fs';
 import { ethers } from 'ethers';
 

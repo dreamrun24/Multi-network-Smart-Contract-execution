@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+/*
+ Multi Network Smart Contract Studio – Counter.sol
+ Purpose: Simple counter contract used for testing deployments and calls.
+ Functions:
+ - increment() increases the counter by one.
+ - get() returns the current counter value.
+ Notes:
+ - Great for demonstrating transactions and reads in Hardhat tests.
+*/
 contract Counter {
   uint public x;
 

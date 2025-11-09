@@ -1,3 +1,10 @@
+/*
+ Multi Network Smart Contract Studio – scripts/check-chainid.mjs
+ Purpose: Print the chain ID of the target RPC for quick verification.
+ Usage:
+ - Set RPC_URL in env or edit script, then run:
+ - `node scripts/check-chainid.mjs`
+*/
 import 'dotenv/config';
 
 const rpcUrl = process.env.RPC_URL;

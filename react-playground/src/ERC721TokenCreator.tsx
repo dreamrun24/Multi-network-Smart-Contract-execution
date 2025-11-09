@@ -1,3 +1,21 @@
+/*
+  Beginner Guide: ERC721TokenCreator
+  - Purpose: Deploy a minimal NFT (ERC‑721‑like) contract, mint a token,
+    and read owner, balance, and tokenURI in one page.
+  - Quick Steps:
+    1) Connect wallet and select a test network.
+    2) Fill name, symbol, and admin (your address), then Deploy.
+    3) Enter recipient, tokenId, and tokenURI, then Mint.
+    4) Use the reads to check owner, balance, and open the tokenURI.
+  - Key Functions:
+    compileERC721 → compiles Solidity to ABI/bytecode (with fallback precompiled).
+    deployContract → deploys contract and stores its address.
+    mintNFT → sends mint tx, waits for confirmation, then auto-refreshes reads.
+    queryOwnerOf / queryBalanceOf / queryTokenURI → on-chain reads.
+  - UX Notes:
+    • “View URI” opens the HTTP gateway link in a new tab.
+    • Only the contract owner can mint; we pre-check the signer.
+*/
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './index.css';
 import { BrowserProvider, Contract, ethers } from 'ethers';
@@ -82,6 +100,8 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
   const [balanceOfResult, setBalanceOfResult] = useState<string>('');
   const [tokenUriQuery, setTokenUriQuery] = useState<string>('');
   const [tokenUriResult, setTokenUriResult] = useState<string>('');
+  const [tokenUriHttpResult, setTokenUriHttpResult] = useState<string>('');
+  const [metadataPreview, setMetadataPreview] = useState<{ name?: string; imageHttp?: string; status?: string }>({});
 
   const mintRef = useRef<HTMLDivElement | null>(null);
 
@@ -169,6 +189,14 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
   const isValidSymbol = (sym: string) => /^[A-Z]{2,10}$/.test(sym.trim());
   const isValidTokenId = (id: string) => /^[1-9][0-9]*$/.test(id.trim());
   const isValidTokenURI = (uri: string) => /^(ipfs:\/\/|https:\/\/)/.test(uri.trim());
+  const toHttpUri = (uri: string, gateway: string = 'https://ipfs.io') => {
+    const u = (uri || '').trim();
+    if (!u) return '';
+    if (!u.startsWith('ipfs://')) return u;
+    let path = u.slice('ipfs://'.length);
+    if (!path.startsWith('ipfs/')) path = 'ipfs/' + path;
+    return `${gateway}/${path}`;
+  };
 
   // ERC721 minimal ABI (matching our compiled source)
   const ERC721_MIN_ABI = [
@@ -339,10 +367,23 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
     }
 
     setIsMinting(true);
-    setMintStatus('Sending mint transaction...');
+    setMintStatus('Preparing mint...');
     try {
       const signer = await provider.getSigner();
       const contract = new Contract(contractAddr, ERC721_MIN_ABI, signer);
+
+      // Ensure signer is contract owner (mint is owner-only)
+      try {
+        const ownerAddr = await contract.owner();
+        const signerAddr = await signer.getAddress();
+        if (ownerAddr.toLowerCase() !== signerAddr.toLowerCase()) {
+          setMintStatus('❌ Mint denied: signer is not contract owner');
+          setIsMinting(false);
+          return;
+        }
+      } catch {}
+
+      setMintStatus('Sending mint transaction...');
       const tx = await contract.mint(mintToAddress, BigInt(tokenId), tokenURI);
       setMintStatus('Waiting for first confirmation...');
       let rec;
@@ -350,20 +391,85 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
         rec = await provider.waitForTransaction(tx.hash, 1, CONFIRM_TIMEOUT_MS);
       } catch (e: any) {
         if (String(e?.code).toUpperCase() === 'TIMEOUT') {
-          setMintStatus('⏱️ Confirmation delayed. Assuming success. Verify on explorer.');
+          setMintStatus('⏱️ Pending confirmation. Verify on explorer; will update when mined.');
+          setIsMinting(false);
+          return; // do not claim success
         } else {
           throw e;
         }
       }
+
+      if (rec && (rec as any).status === 0) {
+        setMintStatus('❌ Mint reverted. See explorer for details.');
+        setIsMinting(false);
+        return;
+      }
+
       setMintStatus(`Minted token #${tokenId} to ${shortAddr(mintToAddress)}`);
       setCelebrateMsg(`🎉 Minted NFT #${tokenId}!`);
+
+      // Auto-populate queries with minted values and update results
+      setOwnerOfQuery(tokenId);
+      setBalanceOfQuery(mintToAddress);
+      setTokenUriQuery(tokenId);
+      try {
+        const read = new Contract(contractAddr, ERC721_MIN_ABI, provider);
+        const owner = await read.ownerOf(BigInt(tokenId));
+        setOwnerOfResult(owner);
+        const bal = await read.balanceOf(mintToAddress);
+        setBalanceOfResult(String(bal));
+        const uri = await read.tokenURI(BigInt(tokenId));
+        setTokenUriResult(uri);
+        const httpUri = toHttpUri(uri);
+        setTokenUriHttpResult(httpUri);
+
+        // Immediately open in a new tab to give clear feedback
+        try {
+          const toOpen = httpUri || uri;
+          if (toOpen && /^https?:\/\//i.test(toOpen)) {
+            window.open(toOpen, '_blank', 'noopener');
+          }
+        } catch {}
+
+        // Attempt to fetch metadata for preview
+        setMetadataPreview({ status: 'Loading...' });
+        try {
+          const res = await fetch(httpUri);
+          const contentType = res.headers.get('content-type') || '';
+          if (res.ok && contentType.includes('application/json')) {
+            const data = await res.json();
+            const name = (data && (data.name || data.title)) || '';
+            const imageSrc = (data && (data.image || data.image_url || '')) || '';
+            const imageHttp = toHttpUri(String(imageSrc));
+            setMetadataPreview({ name, imageHttp, status: 'OK' });
+          } else {
+            setMetadataPreview({ status: 'Not JSON' });
+          }
+        } catch {
+          setMetadataPreview({ status: 'Fetch error' });
+        }
+      } catch {}
     } catch (err: any) {
       console.error('Mint failed:', err);
-      setMintStatus('Mint failed');
+      const reason = extractRpcReason(err);
+      setMintStatus(`Mint failed: ${reason}`);
     } finally {
       setIsMinting(false);
     }
   };
+
+  // Extract readable revert reason from RPC errors
+  function extractRpcReason(e: any): string {
+    try {
+      if (e?.reason) return String(e.reason);
+      if (e?.shortMessage) return String(e.shortMessage).replace(/^Error:\s*/i, '');
+      const msg = String(e?.message || e);
+      const m = msg.match(/execution reverted:?\s*(.*)$/i) || msg.match(/reverted:?\s*(.*)$/i);
+      return m ? m[1] : msg;
+    } catch {
+      return 'Error';
+    }
+  }
 
   const queryOwnerOf = async () => {
     if (!provider || !contractAddr || !isValidTokenId(ownerOfQuery)) { setOwnerOfResult(''); return; }
@@ -371,8 +477,9 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
       const contract = new Contract(contractAddr, ERC721_MIN_ABI, provider);
       const owner = await contract.ownerOf(BigInt(ownerOfQuery));
       setOwnerOfResult(owner);
-    } catch (err) {
-      setOwnerOfResult('Not found / error');
+    } catch (err: any) {
+      const reason = extractRpcReason(err);
+      setOwnerOfResult(reason || 'Not found');
     }
   };
 
@@ -388,13 +495,35 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
   };
 
   const queryTokenURI = async () => {
-    if (!provider || !contractAddr || !isValidTokenId(tokenUriQuery)) { setTokenUriResult(''); return; }
+    if (!provider || !contractAddr || !isValidTokenId(tokenUriQuery)) { setTokenUriResult(''); setTokenUriHttpResult(''); setMetadataPreview({}); return; }
     try {
       const contract = new Contract(contractAddr, ERC721_MIN_ABI, provider);
       const uri = await contract.tokenURI(BigInt(tokenUriQuery));
       setTokenUriResult(uri);
+      const httpUri = toHttpUri(uri);
+      setTokenUriHttpResult(httpUri);
+
+      // Attempt to fetch metadata for preview
+      setMetadataPreview({ status: 'Loading...' });
+      try {
+        const res = await fetch(httpUri);
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
+          const data = await res.json();
+          const name = (data && (data.name || data.title)) || '';
+          const imageSrc = (data && (data.image || data.image_url || '')) || '';
+          const imageHttp = toHttpUri(String(imageSrc));
+          setMetadataPreview({ name, imageHttp, status: 'OK' });
+        } else {
+          setMetadataPreview({ status: 'Not JSON' });
+        }
+      } catch (e) {
+        setMetadataPreview({ status: 'Fetch error' });
+      }
     } catch (err) {
       setTokenUriResult('Error');
+      setTokenUriHttpResult('');
+      setMetadataPreview({ status: 'Error' });
     }
   };
 
@@ -568,7 +697,7 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
                         <h3 className="font-medium mb-2">Owner Of</h3>
                         <input className="input-base input-focus-brand w-full mb-2" placeholder="Token ID" value={ownerOfQuery} onChange={(e) => setOwnerOfQuery(e.target.value)} />
                         <button className="btn-secondary btn-focus-brand w-full" onClick={queryOwnerOf} disabled={!isValidTokenId(ownerOfQuery)}>Check Owner</button>
-                        {ownerOfResult && (<div className="text-sm bg-gray-100 dark:bg-gray-700 rounded p-2 mt-2">Owner: {shortAddr(ownerOfResult)}</div>)}
+                        {ownerOfResult && (<div className="text-sm bg-gray-100 dark:bg-gray-700 rounded p-2 mt-2 break-all">Owner: {isValidAddress(ownerOfResult) ? shortAddr(ownerOfResult) : ownerOfResult}</div>)}
                       </div>
                       <div>
                         <h3 className="font-medium mb-2">Balance Of</h3>
@@ -580,7 +709,24 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
                         <h3 className="font-medium mb-2">Token URI</h3>
                         <input className="input-base input-focus-brand w-full mb-2" placeholder="Token ID" value={tokenUriQuery} onChange={(e) => setTokenUriQuery(e.target.value)} />
                         <button className="btn-secondary btn-focus-brand w-full" onClick={queryTokenURI} disabled={!isValidTokenId(tokenUriQuery)}>View URI</button>
-                        {tokenUriResult && (<div className="text-sm bg-gray-100 dark:bg-gray-700 rounded p-2 mt-2 break-all">{tokenUriResult}</div>)}
+                        {tokenUriResult && (
+                          <div className="text-sm bg-gray-100 dark:bg-gray-700 rounded p-2 mt-2 break-all">
+                            <div>
+                              <a href={(tokenUriHttpResult || tokenUriResult)} target="_blank" rel="noopener noreferrer" className="underline">
+                                {tokenUriResult}
+                              </a>
+                              {tokenUriHttpResult && tokenUriHttpResult !== tokenUriResult && (
+                                <span className="text-xs ml-2">(opens via gateway)</span>
+                              )}
+                            </div>
+                            {metadataPreview?.status && (
+                              <div className="text-xs mt-1">Metadata: {metadataPreview.status}{metadataPreview.name ? ` • ${metadataPreview.name}` : ''}</div>
+                            )}
+                            {metadataPreview?.imageHttp && (
+                              <img src={metadataPreview.imageHttp} alt={metadataPreview.name || 'NFT image'} className="mt-2 max-h-40 rounded border" />
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

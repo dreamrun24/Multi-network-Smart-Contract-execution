@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ Multi Network Smart Contract Studio – BioVToken.sol
+ Purpose: Example ERC-20 token used in the ERC20 Token Creator tab.
+ Overview:
+ - Uses OpenZeppelin libraries for secure ERC-20 implementation.
+ - Includes minting and role-based access for admin accounts.
+ - Demonstrates how to create a fungible token beginners can mint and test.
+*/
 contract BioVToken {
     string public name;
     string public symbol;

@@ -1,3 +1,12 @@
+/*
+ Multi Network Smart Contract Studio – scripts/deploy-local-ethers.mjs
+ Purpose: Deploy contracts to a local Hardhat node using Ethers.js.
+ Usage:
+ - Start local node: `npx hardhat node`
+ - Run: `node scripts/deploy-local-ethers.mjs`
+ Behavior:
+ - Deploys SimpleStorage and logs the deployed address.
+*/
 import { ethers } from "ethers";
 import fs from "node:fs";
 import path from "node:path";

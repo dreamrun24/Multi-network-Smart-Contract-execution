@@ -1,3 +1,12 @@
+/*
+ Multi Network Smart Contract Studio – scripts/deploy-testnet-ethers.mjs
+ Purpose: Deploy using Ethers.js to a chosen public testnet.
+ Usage:
+ - Set `RPC_URL` and `PRIVATE_KEY` env vars.
+ - Run: `node scripts/deploy-testnet-ethers.mjs`
+ Behavior:
+ - Deploys contracts and logs addresses for frontend configuration.
+*/
 import 'dotenv/config';
 import { ethers } from 'ethers';
 import fs from 'node:fs';

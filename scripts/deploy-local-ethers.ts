@@ -2,6 +2,15 @@ import { ethers } from "ethers";
 import fs from "node:fs";
 import path from "node:path";
 
+/*
+ Multi Network Smart Contract Studio – scripts/deploy-local-ethers.ts
+ Purpose: Example deployment using Ethers.js to a local Hardhat node.
+ Usage:
+ - Start local node: `npx hardhat node`
+ - Deploy: `npx ts-node scripts/deploy-local-ethers.ts`
+ Behavior:
+ - Deploys SimpleStorage and prints the address and a sample interaction.
+*/
 async function main() {
   const rpcUrl = "http://127.0.0.1:8545";
   const provider = new ethers.JsonRpcProvider(rpcUrl);

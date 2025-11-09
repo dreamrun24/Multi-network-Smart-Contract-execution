@@ -1,3 +1,11 @@
+/*
+ Multi Network Smart Contract Studio – App.tsx
+ Purpose: Root UI component wiring the tabbed app and shared styles.
+ What this file does:
+ - Renders the tabbed interface with three primary tabs.
+ - Provides a single place to set global layout and shared CSS.
+ - Keeps the app simple so beginners can focus on each tab’s content.
+*/
 import { useState } from 'react'
 import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'

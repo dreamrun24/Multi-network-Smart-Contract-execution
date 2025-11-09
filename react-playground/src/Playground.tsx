@@ -1,3 +1,18 @@
+/*
+  Beginner Guide: Smart Contract Playground
+  - Purpose: Deploy a minimal contract (SimpleStorage) and interact with it.
+  - Quick Steps:
+    1) Connect wallet and select a test network.
+    2) Deploy SimpleStorage (stores a string message).
+    3) Use Set to change the message; use Get to read it.
+  - Key Functions:
+    compile → compiles Solidity to ABI/bytecode (with fallback precompiled).
+    deploy → deploys the contract and saves the address.
+    setMessage/getMessage → write/read calls to the chain.
+  - UX Notes:
+    • Faucet links are provided for testnet funds.
+    • Errors show readable messages when RPC reverts occur.
+*/
 import { useEffect, useMemo, useState } from 'react';
 import './index.css';
 import { BrowserProvider, Contract, ethers } from 'ethers';

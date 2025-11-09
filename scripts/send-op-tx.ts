@@ -1,3 +1,10 @@
+/*
+ Multi Network Smart Contract Studio – scripts/send-op-tx.ts
+ Purpose: Demonstrate sending an EIP-1559 transaction using ethers.
+ Usage:
+ - Configure RPC and private key via .env or Hardhat.
+ - Run: `npx ts-node scripts/send-op-tx.ts`
+*/
 import { network } from "hardhat";
 
 const { viem } = await network.connect({
