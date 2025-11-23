@@ -19,6 +19,8 @@ import { BrowserProvider, Contract, ethers } from 'ethers';
 import precompiledERC20 from './precompiled/ERC20Minimal.json';
 
 const CONFIRM_TIMEOUT_MS = 35000;
+// Dev private key for local Hardhat node (first default account)
+const DEV_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
 type NetworkKey = 'hoodi' | 'sepolia' | 'holesky' | 'amoy' | 'bscTestnet' | 'fuji' | 'chiado';
 
@@ -33,7 +35,7 @@ const NETWORKS: Record<NetworkKey, {
 }> = {
   hoodi: { chainIdHex: '0x7e3c', chainName: 'Ethereum Hoodi (Testnet)', currency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://rpc.hoodi.xyz'], blockExplorerUrls: ['https://explorer.hoodi.xyz'] },
   sepolia: { chainIdHex: '0xaa36a7', chainName: 'Ethereum Sepolia', currency: { name: 'Sepolia Ether', symbol: 'SEP', decimals: 18 }, rpcUrls: ['https://rpc.sepolia.org'], blockExplorerUrls: ['https://sepolia.etherscan.io'] },
-  holesky: { chainIdHex: '0x4268', chainName: 'Ethereum Holesky (Testnet)', currency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://ethereum-holesky.publicnode.com', 'https://rpc.holesky.ethpandaops.io'], blockExplorerUrls: ['https://holesky.etherscan.io'] },
+  holesky: { chainIdHex: '0x4268', chainName: 'Ethereum Holesky (Testnet)', currency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://ethereum-holesky.publicnode.com', 'https://rpc.holesky.ethpandaops.io'], blockExplorerUrls: ['https://eth-holesky.blockscout.com', 'https://17000.testnet.routescan.io', 'https://holesky.etherscan.io'] },
   amoy: { chainIdHex: '0x13882', chainName: 'Polygon Amoy Testnet', currency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 }, rpcUrls: ['https://rpc-amoy.polygon.technology'], blockExplorerUrls: ['https://amoy.polygonscan.com'] },
   bscTestnet: { chainIdHex: '0x61', chainName: 'BNB Smart Chain Testnet', currency: { name: 'BNB', symbol: 'BNB', decimals: 18 }, rpcUrls: ['https://data-seed-prebsc-1-s1.binance.org:8545'], blockExplorerUrls: ['https://testnet.bscscan.com'] },
   fuji: { chainIdHex: '0xa869', chainName: 'Avalanche Fuji Testnet', currency: { name: 'AVAX', symbol: 'AVAX', decimals: 18 }, rpcUrls: ['https://api.avax-test.network/ext/bc/C/rpc'], blockExplorerUrls: ['https://testnet.snowtrace.io'] },
@@ -71,7 +73,13 @@ const ERC20_ABI = [
   "function symbol() view returns (string)",
   "function totalSupply() view returns (uint256)",
   "function balanceOf(address) view returns (uint256)",
-  "function mint(address to, uint256 amount)"
+  "function owner() view returns (address)",
+  "function mint(address to, uint256 amount)",
+  // AccessControl helpers for local role management
+  "function MINTER_ROLE() view returns (bytes32)",
+  "function DEFAULT_ADMIN_ROLE() view returns (bytes32)",
+  "function hasRole(bytes32 role, address account) view returns (bool)",
+  "function grantRole(bytes32 role, address account)"
 ];
 
 function shortAddr(addr?: string) { 
@@ -81,6 +89,15 @@ function shortAddr(addr?: string) {
 
 function explorerFor(key: NetworkKey) { 
   return NETWORKS[key].blockExplorerUrls[0] || ''; 
+}
+
+// Detect MetaMask circuit-breaker (rate-limited RPC) errors for clearer guidance
+function isBrokenCircuit(e: any): boolean {
+  try {
+    if (e?.data?.cause?.isBrokenCircuitError) return true;
+    const msg = String(e?.message || e || '');
+    return /circuit breaker/i.test(msg);
+  } catch { return false; }
 }
 
 // Prefer MetaMask when multiple injected providers exist
@@ -104,6 +121,8 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
   const [account, setAccount] = useState<string>('');
   const [connected, setConnected] = useState(false);
   const [explicitlyConnected, setExplicitlyConnected] = useState(false);
+  // Local signer for Hardhat/Anvil when in local mode
+  const [localSigner, setLocalSigner] = useState<any>(null);
   
   // Beginner enhancements
   const [beginnerMode, setBeginnerMode] = useState<boolean>(true);
@@ -115,11 +134,14 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
   const [tokenName, setTokenName] = useState<string>('My Token');
   const [tokenSymbol, setTokenSymbol] = useState<string>('MTK');
   const [adminAddress, setAdminAddress] = useState<string>('');
+  // Add local RPC URL with fallback support
+  const [localProviderUrl, setLocalProviderUrl] = useState<string>('http://127.0.0.1:8545');
   
   // Contract state
   const [contractAddr, setContractAddr] = useState<string>('');
   const [isDeploying, setIsDeploying] = useState(false);
   const [deployStatus, setDeployStatus] = useState<string>('');
+  const [contractOwner, setContractOwner] = useState<string>('');
   
   // Token interaction
   const [mintToAddress, setMintToAddress] = useState<string>('');
@@ -131,7 +153,11 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
   const [isCheckingBalance, setIsCheckingBalance] = useState(false);
   const [isCheckingSupply, setIsCheckingSupply] = useState(false);
   const [mintStatus, setMintStatus] = useState<string>('');
-
+  // NEW: allow hiding owner details when not needed
+  const [showOwnerDetails, setShowOwnerDetails] = useState<boolean>(false);
+  // NEW: auto-refresh reads after mint (MetaMask indexing lag)
+  const [isAutoRefreshingReads, setIsAutoRefreshingReads] = useState<boolean>(false);
+  
   const tokenInteractionRef = useRef<HTMLDivElement | null>(null);
   const mintAddressInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -141,11 +167,11 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
         const eth = getInjectedProvider();
         if (eth) return new BrowserProvider(eth);
       } else {
-        return new ethers.JsonRpcProvider('http://127.0.0.1:8545');
+        return new ethers.JsonRpcProvider(localProviderUrl);
       }
     }
     return null;
-  }, [mode]);
+  }, [mode, localProviderUrl]);
 
   // Auto-dismiss celebration banners
   useEffect(() => {
@@ -153,6 +179,18 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
     const t = setTimeout(() => setCelebrateMsg(''), 3000);
     return () => clearTimeout(t);
   }, [celebrateMsg]);
+
+  // Load contract owner
+  useEffect(() => {
+    if (!contractAddr || !provider) return;
+    (async () => {
+      try {
+        const read = new Contract(contractAddr, ERC20_ABI, provider);
+        const owner = await (read as any).owner();
+        setContractOwner(owner);
+      } catch {}
+    })();
+  }, [contractAddr, provider]);
 
   // Auto-detect wallet connection
   useEffect(() => {
@@ -174,6 +212,24 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
     checkConnection();
   }, [provider, mode, adminAddress]);
 
+  // NEW: When switching to Local mode, auto-bind to local signer and refresh account
+  useEffect(() => {
+    (async () => {
+      try {
+        if (mode === 'local') {
+          const wallet = new ethers.Wallet(DEV_PRIVATE_KEY, new ethers.JsonRpcProvider(localProviderUrl) as any);
+          setLocalSigner(wallet);
+          setAccount(wallet.address);
+          setConnected(true);
+          setExplicitlyConnected(false);
+          if (!adminAddress) setAdminAddress(wallet.address);
+        }
+      } catch (e) {
+        console.warn('Failed to auto-bind local signer:', e);
+      }
+    })();
+  }, [mode, localProviderUrl]);
+
   const connectWallet = async () => {
     if (!provider) {
       alert('Please install MetaMask or another Web3 wallet');
@@ -181,8 +237,34 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
     }
 
     try {
-      await provider.send('eth_requestAccounts', []);
-      const signer = await provider.getSigner();
+      if (mode === 'local') {
+        // Ensure local node is reachable with fallback
+        const ok = await ensureLocalRpcReachable();
+        if (!ok) {
+          alert('Local node not reachable. Start Hardhat: npx hardhat node');
+          return;
+        }
+        const wallet = new ethers.Wallet(DEV_PRIVATE_KEY, new ethers.JsonRpcProvider(localProviderUrl) as any);
+        setLocalSigner(wallet);
+        setAccount(wallet.address);
+        setConnected(true);
+        setExplicitlyConnected(false);
+        if (!adminAddress) setAdminAddress(wallet.address);
+        return;
+      }
+      // Real network via injected wallet
+      const eth = getInjectedProvider();
+      if (!eth) {
+        alert('Wallet not detected');
+        return;
+      }
+      const accounts: string[] = await eth.request({ method: 'eth_requestAccounts' });
+      const addr = accounts?.[0];
+      if (!addr) {
+        alert('No account returned by wallet');
+        return;
+      }
+      const signer = await (provider as any).getSigner();
       const address = await signer.getAddress();
       setAccount(address);
       setConnected(true);
@@ -190,6 +272,8 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
       if (!adminAddress) setAdminAddress(address);
     } catch (error) {
       console.error('Failed to connect wallet:', error);
+      const msg = (error as any)?.code === 4001 ? 'You rejected the connect request in MetaMask.' : String((error as any)?.message || error);
+      alert('Connect error: ' + msg);
     }
   };
 
@@ -198,53 +282,29 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
 
     const network = NETWORKS[networkKey];
     try {
-      await provider.send('wallet_switchEthereumChain', [{ chainId: network.chainIdHex }]);
+      const eth = getInjectedProvider();
+      if (!eth) throw new Error('Wallet provider missing');
+      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: network.chainIdHex }] });
     } catch (error: any) {
-      if (error.code === 4902) {
+      if (error?.code === 4902) {
         try {
-          await provider.send('wallet_addEthereumChain', [{
+          const eth = getInjectedProvider();
+          if (!eth) throw new Error('Wallet provider missing');
+          await eth.request({ method: 'wallet_addEthereumChain', params: [{
             chainId: network.chainIdHex,
             chainName: network.chainName,
             nativeCurrency: network.currency,
             rpcUrls: network.rpcUrls,
             blockExplorerUrls: network.blockExplorerUrls,
-          }]);
-        } catch (addError) {
-          console.error('Failed to add network:', addError);
+          }] });
+        } catch (addErr) {
+          console.error('Failed to add chain:', addErr);
         }
       } else {
-        console.error('Failed to switch network:', error);
+        console.error('Switch network failed:', error);
       }
     }
   };
-
-  async function compileERC20(): Promise<{ abi: any[]; bytecode: string }> {
-    return new Promise((resolve, reject) => {
-      try {
-        const worker = new Worker(new URL('./solc-worker.js', import.meta.url));
-        worker.onmessage = (e: MessageEvent) => {
-          const data = e.data as any;
-          if (data.ok) {
-            const abi = data.abi;
-            const bytecode = data.bytecode;
-            resolve({ abi, bytecode });
-          } else {
-            // Fallback to precompiled artifact if compilation fails
-            resolve({ abi: (precompiledERC20 as any).abi, bytecode: (precompiledERC20 as any).bytecode });
-          }
-          try { worker.terminate(); } catch {}
-        };
-        worker.onerror = () => {
-          // Fallback on worker error
-          resolve({ abi: (precompiledERC20 as any).abi, bytecode: (precompiledERC20 as any).bytecode });
-        };
-        worker.postMessage({ source: ERC20_MINIMAL_SRC, filename: 'BioVToken.sol' });
-      } catch (err: any) {
-        // Fallback on unexpected error
-        resolve({ abi: (precompiledERC20 as any).abi, bytecode: (precompiledERC20 as any).bytecode });
-      }
-    });
-  }
 
   const deployToken = async () => {
     // Prevent duplicate clicks while a deploy is in flight
@@ -259,29 +319,22 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
     setDeployStatus('Preparing deployment...');
   
     try {
-      const signer = await provider.getSigner();
+      // Select signer to match the displayed Connected account in all modes
+      const injected = getInjectedProvider();
+      let signer: any = null;
 
-      // Chain mismatch detection
-      try {
-        const current = await provider.send('eth_chainId', []);
-        const selected = NETWORKS[networkKey].chainIdHex.toLowerCase();
-        if (typeof current === 'string' && current.toLowerCase() !== selected) {
-          setDeployStatus('Wrong network. Switching...');
-          await switchNetwork();
-          const after = await provider.send('eth_chainId', []);
-          if (typeof after === 'string' && after.toLowerCase() !== selected) {
-            setDeployStatus('Please switch your wallet to the selected network.');
-            setIsDeploying(false);
-            setCurrentStep(1);
-            return;
-          }
-        }
-      } catch {}
+      if (mode === 'real') {
+        signer = await (provider as any).getSigner();
+      } else {
+        // Local mode: always use a signer bound to the local RPC
+        // Avoid injected wallet entirely to prevent cross-network deployments
+        signer = (localSigner || new ethers.Wallet(DEV_PRIVATE_KEY, provider as any));
+      }
 
-      // Balance check
+      // Pre-check: ensure we have gas funds to confirm
       try {
-        const bal = await provider.getBalance(await signer.getAddress());
-        if (bal === 0n) {
+        const gasBal = await (provider as any).getBalance(await signer.getAddress());
+        if (gasBal === 0n && mode === 'real') {
           setDeployStatus('❌ Insufficient funds for gas. Please top up testnet funds.');
           setIsDeploying(false);
           setCurrentStep(1);
@@ -308,7 +361,7 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
         setDeployStatus('Waiting for first confirmation...');
         let receipt;
         try {
-          receipt = await provider.waitForTransaction(tx!.hash, 1, CONFIRM_TIMEOUT_MS);
+          receipt = await (provider as any).waitForTransaction(tx!.hash, 1, CONFIRM_TIMEOUT_MS);
         } catch (e: any) {
           if (String(e?.code).toUpperCase() === 'TIMEOUT') {
             setDeployStatus('⏱️ Confirmation delayed. Proceeding optimistically...');
@@ -316,8 +369,8 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
             throw e;
           }
         }
-         const address = receipt?.contractAddress ?? (contract as any).target ?? await contract.getAddress();
-         setContractAddr(address);
+        const address = receipt?.contractAddress ?? (contract as any).target ?? await contract.getAddress();
+        setContractAddr(address);
         setDeployStatus(`✅ Token deployed at ${shortAddr(address)}`);
         setCelebrateMsg('✨ Contract live! Your token is on-chain.');
         setCurrentStep(3);
@@ -328,55 +381,66 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
           mintAddressInputRef.current?.focus();
         }, 200);
       } catch (primaryErr: any) {
+        // Handle MetaMask circuit-breaker / RPC rate-limit
+        if (isBrokenCircuit(primaryErr)) {
+          setDeployStatus('❌ Wallet RPC temporarily blocked (MetaMask circuit breaker). Switch networks or wait 30–60s, then retry.');
+          setCurrentStep(1);
+          return;
+        }
         // Fallback: explicit gas limit when estimation fails
         const rawMsg = String(primaryErr?.message || primaryErr);
         const msg = rawMsg.toLowerCase();
         const maybeEstimationFail = (
-        msg.includes('estimate gas') ||
-        msg.includes('estimategas') ||
-        msg.includes('gas required exceeds allowance') ||
-        msg.includes('missing revert data') ||
-        msg.includes('execution reverted') ||
-        msg.includes('call_exception')
+          msg.includes('estimate gas') ||
+          msg.includes('estimategas') ||
+          msg.includes('gas required exceeds allowance') ||
+          msg.includes('missing revert data') ||
+          msg.includes('execution reverted') ||
+          msg.includes('call_exception')
         );
         if (maybeEstimationFail) {
-           try {
-             const fallbackGas = 1_000_000n; // conservative fallback for ERC20
-             setDeployStatus('Retrying with fallback gas...');
-             const contract = await factory.deploy(adminAddress, tokenName, tokenSymbol, { gasLimit: fallbackGas });
-             const tx = contract.deploymentTransaction();
-             setDeployStatus('Waiting for first confirmation...');
-             let receipt;
-             try {
-               receipt = await provider.waitForTransaction(tx!.hash, 1, CONFIRM_TIMEOUT_MS);
-             } catch (e: any) {
-               if (String(e?.code).toUpperCase() === 'TIMEOUT') {
-                 setDeployStatus('⏱️ Confirmation delayed. Proceeding optimistically...');
-               } else {
-                 throw e;
-               }
-             }
-              const address = receipt?.contractAddress ?? (contract as any).target ?? await contract.getAddress();
-              setContractAddr(address);
-             setDeployStatus(`✅ Token deployed at ${shortAddr(address)}`);
-             setCelebrateMsg('✨ Contract live! Your token is on-chain.');
-             setCurrentStep(3);
-             if (!mintToAddress) setMintToAddress(account);
-             setTimeout(() => {
-               tokenInteractionRef.current?.scrollIntoView({ behavior: 'smooth' });
-               mintAddressInputRef.current?.focus();
-             }, 200);
-           } catch (fallbackErr: any) {
-             console.error('Deployment failed (fallback):', fallbackErr);
-            setDeployStatus(`❌ Deployment failed: ${String(fallbackErr?.message || fallbackErr)}`);
-            setCurrentStep(1);
-           }
-         } else {
-           console.error('Deployment failed:', primaryErr);
+          try {
+            const fallbackGas = 1_000_000n; // conservative fallback for ERC20
+            setDeployStatus('Retrying with fallback gas...');
+            const contract = await factory.deploy(adminAddress, tokenName, tokenSymbol, { gasLimit: fallbackGas });
+            const tx = contract.deploymentTransaction();
+            setDeployStatus('Waiting for first confirmation...');
+            let receipt;
+            try {
+              receipt = await (provider as any).waitForTransaction(tx!.hash, 1, CONFIRM_TIMEOUT_MS);
+            } catch (e: any) {
+              if (String(e?.code).toUpperCase() === 'TIMEOUT') {
+                setDeployStatus('⏱️ Confirmation delayed. Proceeding optimistically...');
+              } else {
+                throw e;
+              }
+            }
+            const address = receipt?.contractAddress ?? (contract as any).target ?? await contract.getAddress();
+            setContractAddr(address);
+            setDeployStatus(`✅ Token deployed at ${shortAddr(address)}`);
+            setCelebrateMsg('✨ Contract live! Your token is on-chain.');
+            setCurrentStep(3);
+            if (!mintToAddress) setMintToAddress(account);
+            setTimeout(() => {
+              tokenInteractionRef.current?.scrollIntoView({ behavior: 'smooth' });
+              mintAddressInputRef.current?.focus();
+            }, 200);
+          } catch (fallbackErr: any) {
+            if (isBrokenCircuit(fallbackErr)) {
+              setDeployStatus('❌ Wallet RPC temporarily blocked (MetaMask circuit breaker). Switch networks or wait 30–60s, then retry.');
+              setCurrentStep(1);
+            } else {
+              console.error('Deployment failed (fallback):', fallbackErr);
+              setDeployStatus(`❌ Deployment failed: ${String(fallbackErr?.message || fallbackErr)}`);
+              setCurrentStep(1);
+            }
+          }
+        } else {
+          console.error('Deployment failed:', primaryErr);
           setDeployStatus(`❌ Deployment failed: ${rawMsg}`);
           setCurrentStep(1);
-         }
-       }
+        }
+      }
     } catch (error: any) {
       console.error('Deployment failed:', error);
       setDeployStatus(`❌ Deployment failed: ${String(error?.message || error)}`);
@@ -386,21 +450,24 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
     }
   };
 
+  // Mint tokens (owner-only). In local mode, never use injected wallet; bind to local RPC.
   const mintTokens = async () => {
     if (!contractAddr || !mintToAddress || !mintAmount || !provider) {
       alert('Please deploy contract first and fill all fields');
       return;
     }
-  
+
     setIsMinting(true);
     setMintStatus('Sending mint transaction...');
     try {
-      const signer = await provider.getSigner();
+      const signer = mode === 'real'
+        ? await (provider as any).getSigner()
+        : (localSigner || new ethers.Wallet(DEV_PRIVATE_KEY, provider as any));
 
-      // Pre-check: ensure we have gas funds to confirm
+      // Ensure signer has gas on real networks
       try {
-        const gasBal = await provider.getBalance(await signer.getAddress());
-        if (gasBal === 0n) {
+        const bal = await (provider as any).getBalance(await signer.getAddress());
+        if (bal === 0n && mode === 'real') {
           setMintStatus('❌ Insufficient funds for gas. Top up testnet ETH.');
           setIsMinting(false);
           return;
@@ -408,41 +475,135 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
       } catch {}
 
       const contract = new Contract(contractAddr, ERC20_ABI, signer);
-       
-       const amount = ethers.parseEther(mintAmount);
-       const tx = await contract.mint(mintToAddress, amount);
-       setMintStatus('Waiting for first confirmation...');
-       let rec;
-       try {
-         rec = await provider.waitForTransaction(tx.hash, 1, CONFIRM_TIMEOUT_MS);
-       } catch (e: any) {
-        if (String(e?.code).toUpperCase() === 'TIMEOUT') {
-          setMintStatus('⏱️ Pending confirmation. Verify on explorer; will update when mined.');
-          setIsMinting(false);
-          return; // don’t claim success yet
-        } else {
-          throw e;
+      let mintingContract: any = contract;
+
+      // Owner pre-check, with local impersonation fallback
+      try {
+        const ownerAddr = await (contract as any).owner();
+        const signerAddrRaw = await signer.getAddress();
+        const ownerNorm = ethers.getAddress(ownerAddr as string);
+        const signerNorm = ethers.getAddress(signerAddrRaw);
+        setMintStatus(`Preparing mint: signer ${shortAddr(signerNorm)} | owner ${shortAddr(ownerNorm)}`);
+        if (ownerNorm !== signerNorm) {
+          if (mode === 'local') {
+            try {
+              setMintStatus('Owner mismatch; impersonating owner on local node…');
+              const rpc = new ethers.JsonRpcProvider(localProviderUrl);
+              await (rpc as any).send('hardhat_impersonateAccount', [ownerNorm]);
+              // Try to fund the owner via setBalance; if it fails, send ETH from local signer
+              try {
+                await (rpc as any).send('hardhat_setBalance', [ownerNorm, '0x56BC75E2D63100000']);
+              } catch {
+                try {
+                  const fundTx = await (localSigner || new ethers.Wallet(DEV_PRIVATE_KEY, rpc as any)).sendTransaction({
+                    to: ownerNorm,
+                    value: ethers.parseEther('10')
+                  });
+                  await (rpc as any).waitForTransaction(fundTx.hash, 1);
+                } catch {}
+              }
+              // Encode mint call and send raw tx from impersonated owner to avoid getSigner issues
+              const iface = new ethers.Interface(ERC20_ABI as any);
+              const amountWei = ethers.parseEther(mintAmount);
+              const data = iface.encodeFunctionData('mint', [mintToAddress, amountWei]);
+              const txHash = await (rpc as any).send('eth_sendTransaction', [{
+                from: ownerNorm,
+                to: contractAddr,
+                data,
+                gas: '0x7A120' // ~500,000 gas
+              }]);
+              setMintStatus('Waiting for first confirmation...');
+              const rec = await (rpc as any).waitForTransaction(txHash, 1);
+              if (rec && (rec as any).status === 0) {
+                setMintStatus('❌ Mint reverted. See explorer for details.');
+                setIsMinting(false);
+                return;
+              }
+              setMintStatus(`✅ ${mintAmount} ${tokenSymbol} minted to ${shortAddr(mintToAddress)}`);
+              setCelebrateMsg('🎉 First supply created. You own real tokens now.');
+              setCurrentStep(4);
+              try { await checkBalance(); } catch {}
+              try { await checkTotalSupply(); } catch {}
+              setIsMinting(false);
+              return;
+            } catch (impErr) {
+              console.error('Impersonation/raw mint failed:', impErr);
+              setMintStatus('❌ Could not impersonate owner on local node. Ensure app is in Local mode and Hardhat is running, or connect the owner directly.');
+              setIsMinting(false);
+              return;
+            }
+          } else {
+            setMintStatus('❌ Mint requires the owner account. Connect the owner wallet or redeploy with this admin address.');
+            setIsMinting(false);
+            return;
+          }
         }
-       }
-      // Check receipt status explicitly
+      } catch {}
+
+      const amount = ethers.parseEther(mintAmount);
+      const tx = await mintingContract.mint(mintToAddress, amount);
+      const txUrl = `${explorerFor(networkKey)}/tx/${tx.hash}`;
+      setMintStatus(`Mint submitted. Waiting for first confirmation… (${shortAddr(tx.hash)})`);
+
+      let rec: any;
+      const waitReceipt = (async () => {
+        try {
+          return await (tx as any).wait(1);
+        } catch (e: any) {
+          try {
+            return await (provider as any).waitForTransaction(tx.hash, 1);
+          } catch (e2: any) {
+            return null;
+          }
+        }
+      })();
+
+      const timeout = new Promise((resolve) => setTimeout(() => resolve('timeout'), CONFIRM_TIMEOUT_MS));
+      const outcome: any = await Promise.race([waitReceipt, timeout]);
+
+      if (outcome === 'timeout' || !outcome) {
+        setMintStatus(`⏳ Mint pending. Confirmation is taking longer; view tx: ${txUrl}`);
+        setIsMinting(false);
+        return;
+      }
+
+      rec = outcome;
+
       if (rec && (rec as any).status === 0) {
         setMintStatus('❌ Mint reverted. See explorer for details.');
       } else {
         setMintStatus(`✅ ${mintAmount} ${tokenSymbol} minted to ${shortAddr(mintToAddress)}`);
         setCelebrateMsg('🎉 First supply created. You own real tokens now.');
         setCurrentStep(4);
-        // Auto-refresh reads after success
+        // Auto-update the balance address to the minted recipient in MetaMask mode
+        setBalanceAddress(mintToAddress);
         try { await checkBalance(); } catch {}
         try { await checkTotalSupply(); } catch {}
+        // Background: ensure reads reflect the minted state as new blocks arrive
+        try {
+          setIsAutoRefreshingReads(true);
+          await ensureMintReflected(mintToAddress, amount);
+        } catch {}
+        finally {
+          setIsAutoRefreshingReads(false);
+        }
       }
-     } catch (error: any) {
-       console.error('Minting failed:', error);
-       setMintStatus(`❌ Minting failed: ${error.message || 'Unknown error'}`);
-     } finally {
-       setIsMinting(false);
-     }
-   };
-
+    } catch (error: any) {
+      console.error('Minting failed:', error);
+      const raw = String(error?.shortMessage || error?.reason || error?.message || error || 'Unknown error');
+      if (isBrokenCircuit(error)) {
+        setMintStatus('❌ Wallet RPC temporarily blocked (MetaMask circuit breaker). Switch networks or wait 30–60s, then retry.');
+      } else if (/CALL_EXCEPTION/i.test(String(error?.code)) && /missing revert data/i.test(raw)) {
+        setMintStatus('❌ Minting failed: access control or owner check likely failed. Ensure you are connected as the owner set during deployment.');
+      } else if (/not owner/i.test(raw)) {
+        setMintStatus('❌ Minting failed: not owner. Connect the owner wallet or redeploy with this admin address.');
+      } else {
+        setMintStatus(`❌ Minting failed: ${raw}`);
+      }
+    } finally {
+      setIsMinting(false);
+    }
+  };
   const checkBalance = async () => {
     if (!contractAddr || !provider) {
       alert('Please deploy contract first');
@@ -734,6 +895,7 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
                       <h3 className="font-medium mb-3">Mint Tokens</h3>
                       <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Who gets the first mint? Enter a wallet address to receive fresh tokens.</p>
                       <div className="space-y-2">
+                        {/* Owner/mismatch panel removed per request */}
                         <input 
                           className="input-base input-focus-brand"
                           ref={mintAddressInputRef}
@@ -746,7 +908,6 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
                           value={mintAmount}
                           onChange={(e) => setMintAmount(e.target.value)}
                           placeholder="Amount (e.g., 100)"
-                          type="number"
                         />
                         <button 
                           className="btn-base success-gradient text-white btn-focus-success w-full"
@@ -780,10 +941,13 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
                         <button 
                           className="btn-secondary btn-focus-brand w-full"
                           onClick={checkBalance}
-                          disabled={isCheckingBalance || !ethers.isAddress(balanceAddress)}
+                          disabled={isCheckingBalance || isAutoRefreshingReads || !ethers.isAddress(balanceAddress)}
                         >
                           {isCheckingBalance ? 'Checking...' : 'Check Balance'}
                         </button>
+                        {isAutoRefreshingReads && (
+                          <div className="text-xs text-gray-600 dark:text-gray-300">Auto-refreshing from new blocks…</div>
+                        )}
                         {balance && (
                           <div className="text-sm bg-gray-100 dark:bg-gray-700 rounded p-2">
                             Balance: {balance} {tokenSymbol}
@@ -820,3 +984,63 @@ export default function ERC20TokenCreator({ dark }: ERC20TokenCreatorProps) {
 }
 
 const ERC20_MINIMAL_SRC = `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.20;\n\ncontract BioVToken {\n    string public name;\n    string public symbol;\n    uint8 public decimals = 18;\n    uint256 public totalSupply;\n    address public owner;\n    mapping(address => uint256) private _balances;\n\n    constructor(address admin, string memory _name, string memory _symbol) {\n        owner = admin;\n        name = _name;\n        symbol = _symbol;\n    }\n\n    modifier onlyOwner() {\n        require(msg.sender == owner, "not owner");\n        _;\n    }\n\n    function balanceOf(address account) public view returns (uint256) {\n        return _balances[account];\n    }\n\n    function mint(address to, uint256 amount) external onlyOwner {\n        _balances[to] += amount;\n        totalSupply += amount;\n    }\n}`;
+
+// Provide compiled artifact for deployment
+async function compileERC20(): Promise<{ abi: any; bytecode: string }> {
+  try {
+    const artifact = precompiledERC20 as any;
+    const abi = artifact?.abi ?? ERC20_ABI;
+    const bytecode = artifact?.bytecode ?? '0x';
+    if (typeof bytecode === 'string' && bytecode.startsWith('0x') && Array.isArray(abi)) {
+      return { abi, bytecode };
+    }
+  } catch {}
+  // Fallback – return minimal ABI and an empty bytecode to surface an error upstream
+  return { abi: ERC20_ABI, bytecode: '0x' };
+}
+
+// ... existing code ...
+
+  // NEW: After mint, poll on new blocks to ensure reads reflect state
+  const ensureMintReflected = async (to: string, amountWei: bigint) => {
+    try {
+      if (!provider || !contractAddr) return;
+      const read = new Contract(contractAddr, ERC20_ABI, provider);
+      let baselineBal: bigint = 0n;
+      let baselineSupply: bigint = 0n;
+      try {
+        baselineBal = await read.balanceOf(to);
+      } catch {}
+      try {
+        baselineSupply = await read.totalSupply();
+      } catch {}
+      const deadline = Date.now() + 90000; // 90s max
+      const checkOnce = async () => {
+        try {
+          const bal = await read.balanceOf(to);
+          const supply = await read.totalSupply();
+          setBalance(ethers.formatEther(bal));
+          setTotalSupply(ethers.formatEther(supply));
+          if (bal - baselineBal >= amountWei && supply - baselineSupply >= amountWei) {
+            // Updated correctly; stop listening
+            try { (provider as any).off('block', onBlock); } catch {}
+            return true;
+          }
+          return false;
+        } catch {
+          return false;
+        }
+      };
+      const onBlock = async () => {
+        if (Date.now() > deadline) {
+          try { (provider as any).off('block', onBlock); } catch {}
+          return;
+        }
+        const done = await checkOnce();
+        if (done) return;
+      };
+      // Initial check immediately, then on each new block
+      await checkOnce();
+      try { (provider as any).on('block', onBlock); } catch {}
+    } catch {}
+  };

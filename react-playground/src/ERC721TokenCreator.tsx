@@ -22,6 +22,8 @@ import { BrowserProvider, Contract, ethers } from 'ethers';
 import precompiledERC721 from './precompiled/ERC721Minimal.json';
 
 const CONFIRM_TIMEOUT_MS = 35000;
+// Dev private key for local Hardhat node (first default account)
+const DEV_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
 // Networks (reused from ERC20 creator)
 type NetworkKey = 'hoodi' | 'sepolia' | 'holesky' | 'amoy' | 'bscTestnet' | 'fuji' | 'chiado';
@@ -35,7 +37,7 @@ const NETWORKS: Record<NetworkKey, {
 }> = {
   hoodi: { chainIdHex: '0x7e3c', chainName: 'Ethereum Hoodi (Testnet)', currency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://rpc.hoodi.xyz'], blockExplorerUrls: ['https://explorer.hoodi.xyz'] },
   sepolia: { chainIdHex: '0xaa36a7', chainName: 'Ethereum Sepolia', currency: { name: 'Sepolia Ether', symbol: 'SEP', decimals: 18 }, rpcUrls: ['https://rpc.sepolia.org'], blockExplorerUrls: ['https://sepolia.etherscan.io'] },
-  holesky: { chainIdHex: '0x4268', chainName: 'Ethereum Holesky (Testnet)', currency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://ethereum-holesky.publicnode.com', 'https://rpc.holesky.ethpandaops.io'], blockExplorerUrls: ['https://holesky.etherscan.io'] },
+  holesky: { chainIdHex: '0x4268', chainName: 'Ethereum Holesky (Testnet)', currency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://ethereum-holesky.publicnode.com', 'https://rpc.holesky.ethpandaops.io'], blockExplorerUrls: ['https://eth-holesky.blockscout.com', 'https://17000.testnet.routescan.io', 'https://holesky.etherscan.io'] },
   amoy: { chainIdHex: '0x13882', chainName: 'Polygon Amoy Testnet', currency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 }, rpcUrls: ['https://rpc-amoy.polygon.technology'], blockExplorerUrls: ['https://amoy.polygonscan.com'] },
   bscTestnet: { chainIdHex: '0x61', chainName: 'BNB Smart Chain Testnet', currency: { name: 'BNB', symbol: 'BNB', decimals: 18 }, rpcUrls: ['https://data-seed-prebsc-1-s1.binance.org:8545'], blockExplorerUrls: ['https://testnet.bscscan.com'] },
   fuji: { chainIdHex: '0xa869', chainName: 'Avalanche Fuji Testnet', currency: { name: 'AVAX', symbol: 'AVAX', decimals: 18 }, rpcUrls: ['https://api.avax-test.network/ext/bc/C/rpc'], blockExplorerUrls: ['https://testnet.snowtrace.io'] },
@@ -70,6 +72,10 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
   const [networkKey, setNetworkKey] = useState<NetworkKey>('holesky');
   const [account, setAccount] = useState<string>('');
   const [connected, setConnected] = useState(false);
+  // Local signer for Hardhat/Anvil when in local mode
+  const [localSigner, setLocalSigner] = useState<any>(null);
+  // Add local RPC URL with fallback support
+  const [localProviderUrl, setLocalProviderUrl] = useState<string>('http://127.0.0.1:8545');
 
   // Beginner enhancements
   const [beginnerMode, setBeginnerMode] = useState<boolean>(true);
@@ -111,11 +117,11 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
         const eth = getInjectedProvider();
         if (eth) return new BrowserProvider(eth);
       } else {
-        return new ethers.JsonRpcProvider('http://127.0.0.1:8545');
+        return new ethers.JsonRpcProvider(localProviderUrl);
       }
     }
     return null;
-  }, [mode]);
+  }, [mode, localProviderUrl]);
 
   // Auto-dismiss celebration banners
   useEffect(() => {
@@ -146,14 +152,35 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
       return;
     }
     try {
-      await provider.send('eth_requestAccounts', []);
-      const signer = await provider.getSigner();
+      if (mode === 'local') {
+        // Ensure local node is reachable with fallback
+        const ok = await ensureLocalRpcReachable();
+        if (!ok) {
+          alert('Local node not reachable. Start Hardhat: npx hardhat node');
+          return;
+        }
+        const wallet = new ethers.Wallet(DEV_PRIVATE_KEY, new ethers.JsonRpcProvider(localProviderUrl) as any);
+        setLocalSigner(wallet);
+        setAccount(wallet.address);
+        setConnected(true);
+        if (!adminAddress) setAdminAddress(wallet.address);
+        return;
+      }
+      const eth = getInjectedProvider();
+      if (!eth) {
+        alert('Wallet not detected');
+        return;
+      }
+      await eth.request({ method: 'eth_requestAccounts' });
+      const signer = await (provider as any).getSigner();
       const address = await signer.getAddress();
       setAccount(address);
       setConnected(true);
       if (!adminAddress) setAdminAddress(address);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to connect wallet:', error);
+      const msg = error?.code === 4001 ? 'You rejected the connect request in MetaMask.' : String(error?.message || error);
+      alert('Connect error: ' + msg);
     }
   };
 
@@ -161,79 +188,29 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
     if (!provider || mode !== 'real') return;
     const network = NETWORKS[networkKey];
     try {
-      await provider.send('wallet_switchEthereumChain', [{ chainId: network.chainIdHex }]);
+      const eth = getInjectedProvider();
+      if (!eth) throw new Error('Wallet provider missing');
+      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: network.chainIdHex }] });
     } catch (error: any) {
-      if (error.code === 4902) {
+      if (error?.code === 4902) {
         try {
-          await provider.send('wallet_addEthereumChain', [{
+          const eth = getInjectedProvider();
+          if (!eth) throw new Error('Wallet provider missing');
+          await eth.request({ method: 'wallet_addEthereumChain', params: [{
             chainId: network.chainIdHex,
             chainName: network.chainName,
             nativeCurrency: network.currency,
             rpcUrls: network.rpcUrls,
             blockExplorerUrls: network.blockExplorerUrls,
-          }]);
-        } catch (addError) {
-          console.error('Failed to add network:', addError);
+          }] });
+        } catch (addErr) {
+          console.error('Failed to add chain:', addErr);
         }
       } else {
-        console.error('Failed to switch network:', error);
+        console.error('Switch network failed:', error);
       }
     }
   };
-
-  // Validations
-  const isValidAddress = (addr: string) => {
-    try { return ethers.isAddress(addr); } catch { return false; }
-  };
-  const isValidName = (name: string) => name.trim().length >= 3 && name.trim().length <= 40;
-  const isValidSymbol = (sym: string) => /^[A-Z]{2,10}$/.test(sym.trim());
-  const isValidTokenId = (id: string) => /^[1-9][0-9]*$/.test(id.trim());
-  const isValidTokenURI = (uri: string) => /^(ipfs:\/\/|https:\/\/)/.test(uri.trim());
-  const toHttpUri = (uri: string, gateway: string = 'https://ipfs.io') => {
-    const u = (uri || '').trim();
-    if (!u) return '';
-    if (!u.startsWith('ipfs://')) return u;
-    let path = u.slice('ipfs://'.length);
-    if (!path.startsWith('ipfs/')) path = 'ipfs/' + path;
-    return `${gateway}/${path}`;
-  };
-
-  // ERC721 minimal ABI (matching our compiled source)
-  const ERC721_MIN_ABI = [
-    'constructor(address admin, string name, string symbol)',
-    'function name() view returns (string)',
-    'function symbol() view returns (string)',
-    'function owner() view returns (address)',
-    'function balanceOf(address) view returns (uint256)',
-    'function ownerOf(uint256) view returns (address)',
-    'function tokenURI(uint256) view returns (string)',
-    'function mint(address to, uint256 tokenId, string tokenURI)'
-  ];
-
-  async function compileERC721(): Promise<{ abi: any[]; bytecode: string }> {
-    return new Promise((resolve) => {
-      try {
-        const worker = new Worker(new URL('./solc-worker.js', import.meta.url));
-        worker.onmessage = (e: MessageEvent) => {
-          const data = e.data as any;
-          if (data.ok) {
-            const abi = data.abi;
-            const bytecode = data.bytecode;
-            resolve({ abi, bytecode });
-          } else {
-            resolve({ abi: (precompiledERC721 as any).abi, bytecode: (precompiledERC721 as any).bytecode });
-          }
-          try { worker.terminate(); } catch {}
-        };
-        worker.onerror = () => {
-          resolve({ abi: (precompiledERC721 as any).abi, bytecode: (precompiledERC721 as any).bytecode });
-        };
-        worker.postMessage({ source: ERC721_MINIMAL_SRC, filename: 'SimpleNFT.sol' });
-      } catch {
-        resolve({ abi: (precompiledERC721 as any).abi, bytecode: (precompiledERC721 as any).bytecode });
-      }
-    });
-  }
 
   const deployContract = async () => {
     // Prevent duplicate clicks while a deploy is in flight
@@ -250,28 +227,40 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
     setIsDeploying(true);
     setDeployStatus('Preparing deployment...');
     try {
-      const signer = await provider.getSigner();
+      // Choose signer based on mode
+      const signer = mode === 'real'
+        ? await (provider as any).getSigner()
+        : (localSigner || new ethers.Wallet(DEV_PRIVATE_KEY, provider as any));
 
-      // Chain mismatch detection
-      try {
-        const current = await provider.send('eth_chainId', []);
-        const selected = NETWORKS[networkKey].chainIdHex.toLowerCase();
-        if (typeof current === 'string' && current.toLowerCase() !== selected) {
-          setDeployStatus('Wrong network. Switching...');
-          await switchNetwork();
-          const after = await provider.send('eth_chainId', []);
-          if (typeof after === 'string' && after.toLowerCase() !== selected) {
-            setDeployStatus('Please switch your wallet to the selected network.');
-            setIsDeploying(false);
-            return;
+      // Chain mismatch detection for real networks only
+      if (mode === 'real') {
+        try {
+          const current = await (provider as any).send('eth_chainId', []);
+          const selected = NETWORKS[networkKey].chainIdHex.toLowerCase();
+          if (typeof current === 'string' && current.toLowerCase() !== selected) {
+            setDeployStatus('Wrong network. Switching...');
+            await switchNetwork();
+            const after = await (provider as any).send('eth_chainId', []);
+            if (typeof after === 'string' && after.toLowerCase() !== selected) {
+              setDeployStatus('Please switch your wallet to the selected network.');
+              setIsDeploying(false);
+              return;
+            }
           }
+        } catch {}
+      } else {
+        // Ensure local node is reachable
+        try { await (provider as any).getBlockNumber(); } catch {
+          setDeployStatus('Local node not reachable. Start Hardhat with: npx hardhat node');
+          setIsDeploying(false);
+          return;
         }
-      } catch {}
+      }
 
       // Balance check
       try {
-        const bal = await provider.getBalance(await signer.getAddress());
-        if (bal === 0n) {
+        const bal = await (provider as any).getBalance(await signer.getAddress());
+        if (bal === 0n && mode === 'real') {
           setDeployStatus('Insufficient funds on selected network.');
           setIsDeploying(false);
           return;
@@ -296,7 +285,7 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
         setDeployStatus('Waiting for first confirmation...');
         let receipt;
         try {
-          receipt = await provider.waitForTransaction(tx!.hash, 1, CONFIRM_TIMEOUT_MS);
+          receipt = await (provider as any).waitForTransaction(tx!.hash, 1, CONFIRM_TIMEOUT_MS);
         } catch (e: any) {
           if (String(e?.code).toUpperCase() === 'TIMEOUT') {
             setDeployStatus('⏱️ Confirmation delayed. Proceeding optimistically...');
@@ -304,7 +293,7 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
             throw e;
           }
         }
-        const addr = receipt?.contractAddress ?? (contract as any).target ?? await contract.getAddress();
+        const addr = receipt?.contractAddress || (contract as any).target || await contract.getAddress();
         setContractAddr(addr);
         setDeployStatus(`Deployed at ${shortAddr(addr)}`);
         setCelebrateMsg(`NFT deployed to ${shortAddr(addr)}`);
@@ -314,9 +303,17 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
       } catch (primaryErr: any) {
         // Fallback: explicit gas limit
         const msg = String(primaryErr?.message || primaryErr);
+        // Handle MetaMask circuit-breaker / RPC rate-limit
+        try {
+          // Access nested cause if provided by MetaMask
+          const broken = (primaryErr?.data?.cause?.isBrokenCircuitError) || /circuit breaker/i.test(String(primaryErr?.message || primaryErr || ''));
+          if (broken) {
+            setDeployStatus('❌ Wallet RPC temporarily blocked (MetaMask circuit breaker). Switch networks or wait 30–60s, then retry.');
+            return;
+          }
+        } catch {}
         if (msg.toLowerCase().includes('estimate gas') || msg.toLowerCase().includes('gas required exceeds allowance')) {
           try {
-            const txReq = factory.getDeployTransaction(adminAddress, tokenName, tokenSymbol);
             const fallbackGas = 3_000_000n; // conservative fallback
             setDeployStatus('Retrying with fallback gas...');
             const contract = await factory.deploy(adminAddress, tokenName, tokenSymbol, { gasLimit: fallbackGas });
@@ -324,7 +321,7 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
             setDeployStatus('Waiting for first confirmation...');
             let receipt;
             try {
-              receipt = await provider.waitForTransaction(tx!.hash, 1, CONFIRM_TIMEOUT_MS);
+              receipt = await (provider as any).waitForTransaction(tx!.hash, 1, CONFIRM_TIMEOUT_MS);
             } catch (e: any) {
               if (String(e?.code).toUpperCase() === 'TIMEOUT') {
                 setDeployStatus('⏱️ Confirmation delayed. Proceeding optimistically...');
@@ -332,7 +329,7 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
                 throw e;
               }
             }
-            const addr = receipt?.contractAddress ?? (contract as any).target ?? await contract.getAddress();
+            const addr = receipt?.contractAddress || (contract as any).target || await contract.getAddress();
             setContractAddr(addr);
             setDeployStatus(`Deployed at ${shortAddr(addr)}`);
             setCelebrateMsg(`NFT deployed to ${shortAddr(addr)}`);
@@ -340,8 +337,18 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
               mintRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 300);
           } catch (fallbackErr: any) {
-            console.error('Deploy failed (fallback):', fallbackErr);
-            setDeployStatus(`Deploy failed: ${String(fallbackErr?.message || fallbackErr)}`);
+            try {
+              const broken = (fallbackErr?.data?.cause?.isBrokenCircuitError) || /circuit breaker/i.test(String(fallbackErr?.message || fallbackErr || ''));
+              if (broken) {
+                setDeployStatus('❌ Wallet RPC temporarily blocked (MetaMask circuit breaker). Switch networks or wait 30–60s, then retry.');
+              } else {
+                console.error('Deploy failed (fallback):', fallbackErr);
+                setDeployStatus(`Deploy failed: ${String(fallbackErr?.message || fallbackErr)}`);
+              }
+            } catch {
+              console.error('Deploy failed (fallback):', fallbackErr);
+              setDeployStatus(`Deploy failed: ${String(fallbackErr?.message || fallbackErr)}`);
+            }
           }
         } else {
           console.error('Deploy failed:', primaryErr);
@@ -369,7 +376,9 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
     setIsMinting(true);
     setMintStatus('Preparing mint...');
     try {
-      const signer = await provider.getSigner();
+      const signer = mode === 'real'
+        ? await (provider as any).getSigner()
+        : (localSigner || new ethers.Wallet(DEV_PRIVATE_KEY, provider as any));
       const contract = new Contract(contractAddr, ERC721_MIN_ABI, signer);
 
       // Ensure signer is contract owner (mint is owner-only)
@@ -388,7 +397,7 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
       setMintStatus('Waiting for first confirmation...');
       let rec;
       try {
-        rec = await provider.waitForTransaction(tx.hash, 1, CONFIRM_TIMEOUT_MS);
+        rec = await (provider as any).waitForTransaction(tx.hash, 1, CONFIRM_TIMEOUT_MS);
       } catch (e: any) {
         if (String(e?.code).toUpperCase() === 'TIMEOUT') {
           setMintStatus('⏱️ Pending confirmation. Verify on explorer; will update when mined.');
@@ -452,11 +461,46 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
     } catch (err: any) {
       console.error('Mint failed:', err);
       const reason = extractRpcReason(err);
-      setMintStatus(`Mint failed: ${reason}`);
+      try {
+        const broken = (err?.data?.cause?.isBrokenCircuitError) || /circuit breaker/i.test(String(err?.message || err || ''));
+        if (broken) {
+          setMintStatus('❌ Wallet RPC temporarily blocked (MetaMask circuit breaker). Switch networks or wait 30–60s, then retry.');
+        } else {
+          setMintStatus(`Mint failed: ${reason}`);
+        }
+      } catch {
+        setMintStatus(`Mint failed: ${reason}`);
+      }
     } finally {
       setIsMinting(false);
     }
   };
+
+  // Auto-switch when network selection changes and wallet is connected (real mode)
+  useEffect(() => {
+    if (mode === 'real' && connected) {
+      switchNetwork().catch(() => {});
+    }
+  }, [networkKey, mode, connected]);
+
+  // Ensure local RPC is reachable; try localhost fallback if 127.0.0.1 fails
+  async function ensureLocalRpcReachable(): Promise<boolean> {
+    if (!provider) return false;
+    try {
+      await (provider as any).getBlockNumber();
+      return true;
+    } catch {
+      try {
+        const alt = 'http://localhost:8545';
+        if (localProviderUrl !== alt) setLocalProviderUrl(alt);
+        const altProvider = new ethers.JsonRpcProvider(alt);
+        await (altProvider as any).getBlockNumber();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
 
   // Extract readable revert reason from RPC errors
   function extractRpcReason(e: any): string {
@@ -740,5 +784,69 @@ export default function ERC721TokenCreator({ dark }: ERC721TokenCreatorProps) {
   );
 }
 
-// Minimal ERC-721-like source compiled in-browser
-const ERC721_MINIMAL_SRC = `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.20;\n\ncontract SimpleNFT {\n    string public name;\n    string public symbol;\n    address public owner;\n\n    mapping(uint256 => address) private _ownerOf;\n    mapping(address => uint256) private _balance;\n    mapping(uint256 => string) private _tokenURI;\n\n    event Transfer(address indexed from, address indexed to, uint256 indexed tokenId);\n\n    constructor(address admin, string memory _name, string memory _symbol) {\n        owner = admin;\n        name = _name;\n        symbol = _symbol;\n    }\n\n    modifier onlyOwner() {\n        require(msg.sender == owner, 'Not owner');\n        _;\n    }\n\n    function balanceOf(address account) external view returns (uint256) {\n        require(account != address(0), 'Zero address');\n        return _balance[account];\n    }\n\n    function ownerOf(uint256 tokenId) external view returns (address) {\n        address o = _ownerOf[tokenId];\n        require(o != address(0), 'Token does not exist');\n        return o;\n    }\n\n    function tokenURI(uint256 tokenId) external view returns (string memory) {\n        require(_ownerOf[tokenId] != address(0), 'Token does not exist');\n        return _tokenURI[tokenId];\n    }\n\n    function mint(address to, uint256 tokenId, string memory uri) external onlyOwner {\n        require(to != address(0), 'Zero address');\n        require(_ownerOf[tokenId] == address(0), 'Already minted');\n        _ownerOf[tokenId] = to;\n        _balance[to] += 1;\n        _tokenURI[tokenId] = uri;\n        emit Transfer(address(0), to, tokenId);\n    }\n\n    // Minimal ERC165 interface detection for ERC721 & metadata\n    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {\n        return interfaceId == 0x80ac58cd /* ERC721 */ || interfaceId == 0x5b5e139f /* ERC721Metadata */;\n    }\n}`;
+// Minimal ERC-721 ABI for interaction
+const ERC721_MIN_ABI = [
+  "constructor(address admin, string name, string symbol)",
+  "function name() view returns (string)",
+  "function symbol() view returns (string)",
+  "function owner() view returns (address)",
+  "function balanceOf(address) view returns (uint256)",
+  "function ownerOf(uint256) view returns (address)",
+  "function tokenURI(uint256) view returns (string)",
+  "function mint(address to, uint256 tokenId, string uri)",
+  "function supportsInterface(bytes4) view returns (bool)"
+];
+
+function isValidName(name: string): boolean {
+  const n = (name || '').trim();
+  return n.length >= 3 && n.length <= 40;
+}
+
+function isValidSymbol(sym: string): boolean {
+  const s = (sym || '').trim();
+  return /^[A-Z]{2,10}$/.test(s);
+}
+
+function isValidAddress(addr: string): boolean {
+  try { return ethers.isAddress((addr || '').trim()); } catch { return false; }
+}
+
+function isValidTokenId(id: string): boolean {
+  const s = (id || '').trim();
+  if (!/^\d+$/.test(s)) return false;
+  try { return BigInt(s) > 0n; } catch { return false; }
+}
+
+function isValidTokenURI(uri: string): boolean {
+  const u = (uri || '').trim();
+  return /^https?:\/\//i.test(u) || /^ipfs:\/\//i.test(u);
+}
+
+function toHttpUri(uri: string): string {
+  const u = (uri || '').trim();
+  if (!u) return '';
+  if (/^https?:\/\//i.test(u)) return u;
+  const m = u.match(/^ipfs:\/\/(.+)$/i);
+  if (m) {
+    const path = m[1].replace(/^ipfs\//, '');
+    return `https://ipfs.io/ipfs/${path}`;
+  }
+  return '';
+}
+
+// Provide compiled artifact for deployment
+async function compileERC721(): Promise<{ abi: any; bytecode: string }> {
+  try {
+    const artifact = precompiledERC721 as any;
+    const abi = artifact?.abi ?? ERC721_MIN_ABI;
+    const bytecode = artifact?.bytecode ?? '0x';
+    if (typeof bytecode === 'string' && bytecode.startsWith('0x') && Array.isArray(abi)) {
+      return { abi, bytecode };
+    }
+  } catch {}
+  // Fallback – return minimal ABI and an empty bytecode to surface an error upstream
+  return { abi: ERC721_MIN_ABI, bytecode: '0x' };
+}
+
+// Minimal ERC-721 contract source for display in the UI
+const ERC721_MINIMAL_SRC = `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.20;\n\ncontract SimpleNFT {\n    string public name;\n    string public symbol;\n    address public owner;\n\n    mapping(uint256 => address) private _owners;\n    mapping(address => uint256) private _balances;\n    mapping(uint256 => string) private _tokenURIs;\n\n    constructor(address admin, string memory _name, string memory _symbol) {\n        owner = admin;\n        name = _name;\n        symbol = _symbol;\n    }\n\n    modifier onlyOwner() {\n        require(msg.sender == owner, "not owner");\n        _;\n    }\n\n    function balanceOf(address account) public view returns (uint256) {\n        return _balances[account];\n    }\n\n    function ownerOf(uint256 tokenId) public view returns (address) {\n        address o = _owners[tokenId];\n        require(o != address(0), "not minted");\n        return o;\n    }\n\n    function tokenURI(uint256 tokenId) public view returns (string memory) {\n        require(_owners[tokenId] != address(0), "not minted");\n        return _tokenURIs[tokenId];\n    }\n\n    function mint(address to, uint256 tokenId, string memory uri) external onlyOwner {\n        require(to != address(0), "zero address");\n        require(_owners[tokenId] == address(0), "already minted");\n        _owners[tokenId] = to;\n        _balances[to] += 1;\n        _tokenURIs[tokenId] = uri;\n    }\n\n    function supportsInterface(bytes4 interfaceId) public pure returns (bool) {\n        // 0x80ac58cd is the ERC-721 interface id\n        return interfaceId == 0x80ac58cd;\n    }\n}`;

@@ -29,7 +29,7 @@ const NETWORKS: Record<NetworkKey, {
 }> = {
   hoodi: { chainIdHex: '0x7e3c', chainName: 'Ethereum Hoodi (Testnet)', currency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://rpc.hoodi.xyz'], blockExplorerUrls: ['https://explorer.hoodi.xyz'] },
   sepolia: { chainIdHex: '0xaa36a7', chainName: 'Ethereum Sepolia', currency: { name: 'Sepolia Ether', symbol: 'SEP', decimals: 18 }, rpcUrls: ['https://rpc.sepolia.org'], blockExplorerUrls: ['https://sepolia.etherscan.io'] },
-  holesky: { chainIdHex: '0x4268', chainName: 'Ethereum Holesky (Testnet)', currency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://ethereum-holesky.publicnode.com', 'https://rpc.holesky.ethpandaops.io'], blockExplorerUrls: ['https://holesky.etherscan.io'] },
+  holesky: { chainIdHex: '0x4268', chainName: 'Ethereum Holesky (Testnet)', currency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://ethereum-holesky.publicnode.com', 'https://rpc.holesky.ethpandaops.io'], blockExplorerUrls: ['https://eth-holesky.blockscout.com', 'https://17000.testnet.routescan.io', 'https://holesky.etherscan.io'] },
   amoy: { chainIdHex: '0x13882', chainName: 'Polygon Amoy Testnet', currency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 }, rpcUrls: ['https://rpc-amoy.polygon.technology'], blockExplorerUrls: ['https://amoy.polygonscan.com'] },
   bscTestnet: { chainIdHex: '0x61', chainName: 'BNB Smart Chain Testnet', currency: { name: 'BNB', symbol: 'BNB', decimals: 18 }, rpcUrls: ['https://data-seed-prebsc-1-s1.binance.org:8545'], blockExplorerUrls: ['https://testnet.bscscan.com'] },
   fuji: { chainIdHex: '0xa869', chainName: 'Avalanche Fuji Testnet', currency: { name: 'AVAX', symbol: 'AVAX', decimals: 18 }, rpcUrls: ['https://api.avax-test.network/ext/bc/C/rpc'], blockExplorerUrls: ['https://testnet.snowtrace.io'] },
@@ -64,6 +64,18 @@ const SIMPLE_STORAGE_SRC = `// SPDX-License-Identifier: MIT\npragma solidity ^0.
 
 function shortAddr(addr?: string) { if (!addr) return ''; return addr.slice(0, 8) + '…' + addr.slice(-4); }
 function explorerFor(key: NetworkKey) { return NETWORKS[key].blockExplorerUrls[0] || ''; }
+function explorerLabelFor(url: string) {
+  try {
+    const host = new URL(url).hostname;
+    if (host.includes('etherscan')) return 'Etherscan';
+    if (host.includes('blockscout')) return 'Blockscout';
+    if (host.includes('polygonscan')) return 'Polygonscan';
+    if (host.includes('bscscan')) return 'BscScan';
+    if (host.includes('snowtrace')) return 'Snowtrace';
+    if (host.includes('routescan')) return 'RouteScan';
+    return 'Explorer';
+  } catch { return 'Explorer'; }
+}
 
 // Prefer MetaMask when multiple injected providers exist
 function getInjectedProvider(): any {
@@ -96,18 +108,21 @@ export default function Playground() {
   const [sourceCode, setSourceCode] = useState<string>(SIMPLE_STORAGE_SRC);
   const [localSigner, setLocalSigner] = useState<any>(null);
   const [hideFallbackBanner, setHideFallbackBanner] = useState(false);
+  // Add local RPC URL with fallback support
+  const [localProviderUrl, setLocalProviderUrl] = useState<string>('http://127.0.0.1:8545');
+  // New: visible deployment status and interaction gate
+  const [deployStatus, setDeployStatus] = useState<string>('');
+  const [canInteract, setCanInteract] = useState<boolean>(false);
 
   const provider = useMemo(() => {
     if (typeof window !== 'undefined') {
       if (mode === 'real') {
-        const eth = getInjectedProvider();
-        if (eth) return new BrowserProvider(eth);
-      } else {
-        return new ethers.JsonRpcProvider('http://127.0.0.1:8545');
+        try { return new BrowserProvider((window as any).ethereum); } catch { return null; }
       }
+      try { return new ethers.JsonRpcProvider(localProviderUrl) as any; } catch { return null; }
     }
     return null;
-  }, [mode]);
+  }, [mode, localProviderUrl]);
 
 
 
@@ -171,12 +186,13 @@ export default function Playground() {
     try {
       if (mode === 'local') {
         if (!provider) throw new Error('Local RPC not available');
-        try { await (provider as any).getBlockNumber(); } catch {
+        const ok = await ensureLocalRpcReachable();
+        if (!ok) {
           alert('Local node not reachable. Start Hardhat with: npx hardhat node');
           return;
         }
         const devPrivateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
-        const wallet = new ethers.Wallet(devPrivateKey, provider as any);
+        const wallet = new ethers.Wallet(devPrivateKey, new ethers.JsonRpcProvider(localProviderUrl) as any);
         setLocalSigner(wallet);
         setAccount(wallet.address);
         setConnected(true);
@@ -206,12 +222,41 @@ export default function Playground() {
     catch (err: any) { if (err?.code === 4902) { await eth.request({ method: 'wallet_addEthereumChain', params: [{ chainId, chainName: NETWORKS[key].chainName, nativeCurrency: NETWORKS[key].currency, rpcUrls: NETWORKS[key].rpcUrls, blockExplorerUrls: NETWORKS[key].blockExplorerUrls }] }); } else { throw err; } }
   }
 
+  // Auto-switch when network selection changes and wallet is connected (real mode)
+  useEffect(() => {
+    if (mode === 'real' && connected) {
+      ensureNetwork(networkKey).catch(() => {});
+    }
+  }, [networkKey, mode, connected]);
+
+  // Ensure local RPC is reachable; try localhost fallback if 127.0.0.1 fails
+  async function ensureLocalRpcReachable(): Promise<boolean> {
+    if (!provider) return false;
+    try {
+      await (provider as any).getBlockNumber();
+      return true;
+    } catch {
+      try {
+        const alt = 'http://localhost:8545';
+        if (localProviderUrl !== alt) setLocalProviderUrl(alt);
+        const altProvider = new ethers.JsonRpcProvider(alt);
+        await (altProvider as any).getBlockNumber();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+
   async function deploy() {
     try {
       if (!provider) throw new Error('Provider missing');
       setIsDeploying(true);
+      setDeployStatus('');
+      setCanInteract(false);
       if (mode === 'local') {
-        try { await (provider as any).getBlockNumber(); } catch {
+        const ok = await ensureLocalRpcReachable();
+        if (!ok) {
           alert('Local node not reachable. Start Hardhat with: npx hardhat node');
           setIsDeploying(false);
           return;
@@ -222,8 +267,8 @@ export default function Playground() {
       const { abi: compiledAbi, bytecode: compiledBytecode } = await compileSource();
       if (!compiledBytecode || !compiledAbi.length) throw new Error('Compile failed');
       const devPrivateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
-      const signer = mode === 'real' ? await (provider as any).getSigner() : (localSigner || new ethers.Wallet(devPrivateKey, provider as any));
-  
+      const signer = mode === 'real' ? await (provider as any).getSigner() : (localSigner || new ethers.Wallet(devPrivateKey, new ethers.JsonRpcProvider(localProviderUrl) as any));
+
       // Preflight for real networks: estimate gas and check balance to avoid RPC -32603
       if (mode === 'real') {
         try {
@@ -243,22 +288,57 @@ export default function Playground() {
           console.warn('Preflight failed', pfErr);
         }
       }
-  
+
       const factory = new ethers.ContractFactory(compiledAbi, compiledBytecode, signer);
       const contract = await factory.deploy();
-      await contract.waitForDeployment();
-      const addr = await contract.getAddress();
-      setContractAddr(addr);
-      const c = new Contract(addr, compiledAbi, signer);
-      const current = await c.getMessage();
-      setMessage(current);
-    } catch (e: any) { alert('Deploy error: ' + extractRpcReason(e)); } finally { setIsDeploying(false); }
+      // Immediate address for UI
+      const addr = (contract as any).target as string;
+      if (addr) setContractAddr(addr);
+
+      // Wait only for the first confirmation, then show status
+      const tx = contract.deploymentTransaction();
+      const confirmTimeoutMs = 30000;
+      setDeployStatus('Transaction submitted. Waiting for first confirmation…');
+      const waitFirst = (provider as any).waitForTransaction(tx.hash, 1);
+      const timeout = new Promise<void>((resolve) => setTimeout(resolve, confirmTimeoutMs));
+      await Promise.race([waitFirst, timeout]);
+
+      // Background poll for code to appear; don’t block the button/UI
+      setIsDeploying(false);
+      const explorerUrl = explorerFor(networkKey);
+      let code = '0x';
+      for (let i = 0; i < 10 && code === '0x'; i++) {
+        try { code = await (provider as any).getCode(addr); } catch {}
+        if (code === '0x') await new Promise((r) => setTimeout(r, 2000));
+      }
+      if (code !== '0x') {
+        setDeployStatus('Deployment confirmed. Contract code is now visible.');
+        const c = new Contract(addr, compiledAbi, signer);
+        const current = await c.getMessage();
+        setMessage(current);
+        setCanInteract(true);
+      } else {
+        setDeployStatus(`Confirmed or pending. Explorer indexing may lag. View on ${explorerUrl}`);
+        // Try a late resolve without blocking
+        (async () => {
+          try {
+            await contract.waitForDeployment();
+            const c = new Contract(addr, compiledAbi, signer);
+            const current = await c.getMessage();
+            setMessage(current);
+            setCanInteract(true);
+            setDeployStatus('Deployment finalized. Ready to interact.');
+          } catch {}
+        })();
+      }
+    } catch (e: any) { alert('Deploy error: ' + extractRpcReason(e)); setDeployStatus('Deploy failed. Check funds/network and try again.'); } finally { /* isDeploying cleared earlier after race */ }
   }
 
   async function updateMsg() {
     try {
       if (!provider) throw new Error('Provider missing');
       if (!contractAddr) throw new Error('Deploy first');
+      if (!canInteract) throw new Error('Contract not ready yet. Please wait for indexing.');
       setIsUpdating(true);
       if (mode === 'local') {
         try { await (provider as any).getBlockNumber(); } catch {
@@ -280,6 +360,7 @@ export default function Playground() {
   }
 
   const explorer = explorerFor(networkKey);
+  const explorerLabel = explorerLabelFor(explorer);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 bg-grid">
@@ -375,7 +456,7 @@ export default function Playground() {
                   <a className="text-indigo-600 hover:underline" href={`${explorer}/address/${contractAddr}`} target="_blank" rel="noreferrer">{contractAddr}</a>
                   <button className="btn-secondary btn-sm btn-focus-brand" onClick={() => navigator.clipboard.writeText(contractAddr)}>Copy</button>
                   {mode === 'real' && (
-                    <a className="btn-base btn-focus-brand brand-gradient text-white hover:opacity-90" href={`${explorer}/address/${contractAddr}`} target="_blank" rel="noreferrer">View Contract on Etherscan</a>
+                    <a className="btn-base btn-focus-brand brand-gradient text-white hover:opacity-90" href={`${explorer}/address/${contractAddr}`} target="_blank" rel="noreferrer">View Contract on {explorerLabel}</a>
                   )}
                 </div>
               )}
@@ -385,11 +466,14 @@ export default function Playground() {
               <p className="text-sm">Stored message: <span className="font-mono">{message || 'Hello'}</span></p>
               <div className="mt-2 flex gap-2">
                 <input className="flex-1 input-base input-focus-brand" placeholder="Enter new message" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} />
-                <button onClick={updateMsg} disabled={!contractAddr || isUpdating} className="btn-secondary btn-focus-brand disabled:opacity-60">{isUpdating ? 'Updating…' : 'Update Message'}</button>
+                <button onClick={updateMsg} disabled={!contractAddr || isUpdating || !canInteract} className="btn-secondary btn-focus-brand disabled:opacity-60">{isUpdating ? 'Updating…' : 'Update Message'}</button>
               </div>
+              {!canInteract && contractAddr && (
+                <p className="text-xs mt-1 text-gray-500">Waiting for RPC indexing. Interaction will enable once the code is visible.</p>
+              )}
             </div>
   
-  
+
           </section>
   
           <section className="card-base card-shadow p-5">
