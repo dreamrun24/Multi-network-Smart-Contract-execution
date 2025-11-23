@@ -6,7 +6,7 @@ This is the Vite + React app that powers the three tabs:
 - ERC721 NFT Creator
 
 ## Requirements
-- Node.js 18+
+- Node.js 
 - npm
 - MetaMask installed in your browser
 
