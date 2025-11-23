@@ -16,7 +16,7 @@ cd react-playground
 npm install
 npm run dev
 ```
-Open the local URL shown in the terminal (e.g., `http://127.0.0.1:5173/`).
+Open the local URL shown in the terminal (e.g., `localhost`).
 
 ## Using the Tabs
 - Smart Contract Playground: choose a network, connect wallet, deploy the sample contract, and call `setMessage`/`getMessage`.
